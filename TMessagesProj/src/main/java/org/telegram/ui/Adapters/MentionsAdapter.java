@@ -36,6 +36,7 @@ import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.GroupPrivateChatController;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
@@ -1338,6 +1339,9 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                         if (user == null || UserObject.isUserSelf(user) || newResultsHashMap.indexOfKey(user.id) >= 0) {
                             continue;
                         }
+                        if (!GroupPrivateChatController.getInstance(currentAccount).canMentionParticipant(chat, info, user.id)) {
+                            continue;
+                        }
                         if (usernameString.length() == 0) {
                             if (!user.deleted) {
                                 newResult.add(user);
@@ -1371,6 +1375,9 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                     if (id > 0) {
                         TLRPC.User user = messagesController.getUser(dialogs.get(a).id);
                         if (user == null || UserObject.isUserSelf(user) || newResultsHashMap.indexOfKey(user.id) >= 0) {
+                            continue;
+                        }
+                        if (!GroupPrivateChatController.getInstance(currentAccount).canMentionParticipant(chat, info, user.id)) {
                             continue;
                         }
                         if (usernameString.length() == 0) {
@@ -1495,6 +1502,10 @@ public class MentionsAdapter extends RecyclerListView.SelectionAdapter implement
                                             TLRPC.ChannelParticipant participant = res.participants.get(a);
                                             long peerId = MessageObject.getPeerId(participant.peer);
                                             if (searchResultUsernamesMap.indexOfKey(peerId) >= 0 || peerId == 0 && searchResultUsernamesMap.indexOfKey(currentUserId) >= 0 || !isSearchingMentions && (peerId == currentUserId || peerId == 0)) {
+                                                continue;
+                                            }
+                                            if (peerId > 0 && !GroupPrivateChatController.getInstance(currentAccount).canMentionParticipant(chat, info, peerId) &&
+                                                    !(participant instanceof TLRPC.TL_channelParticipantCreator || participant instanceof TLRPC.TL_channelParticipantAdmin)) {
                                                 continue;
                                             }
                                             if (peerId >= 0) {

@@ -43,6 +43,7 @@ import org.telegram.messenger.AnimationNotificationsLocker;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GroupPrivateChatController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
@@ -1336,6 +1337,9 @@ public class ChatUsersActivity extends BaseFragment implements NotificationCente
                         if (peerId == getUserConfig().getClientUserId()) {
                             return;
                         }
+                        if (peerId > 0 && shouldBlockGroupPrivateChat(peerId, view)) {
+                            return;
+                        }
                         Bundle args = new Bundle();
                         if (peerId > 0) {
                             args.putLong("user_id", peerId);
@@ -2322,6 +2326,17 @@ public class ChatUsersActivity extends BaseFragment implements NotificationCente
                 (selectedSlowmode > 0 || defaultBannedRights.send_plain || defaultBannedRights.send_media || defaultBannedRights.send_photos || defaultBannedRights.send_videos
                         || defaultBannedRights.send_stickers || defaultBannedRights.send_audios || defaultBannedRights.send_docs
                         || defaultBannedRights.send_voices || defaultBannedRights.send_roundvideos || defaultBannedRights.embed_links || defaultBannedRights.send_polls || defaultBannedRights.send_reactions);
+    }
+
+    private boolean shouldBlockGroupPrivateChat(long userId, View sourceView) {
+        if (!GroupPrivateChatController.getInstance(currentAccount).shouldBlockPrivateChatFromGroup(currentChat, info, userId)) {
+            return false;
+        }
+        if (sourceView != null) {
+            AndroidUtilities.shakeViewSpring(sourceView, -3);
+        }
+        BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.SafeLinkGroupPrivateChatForbiddenToast)).show();
+        return true;
     }
 
     public void setInfo(TLRPC.ChatFull chatFull) {

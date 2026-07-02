@@ -18759,10 +18759,11 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
                 arrayList.addAll(update.messages);
             } else if (baseUpdate instanceof TL_update.TL_updateChannel) {
+                TL_update.TL_updateChannel update = (TL_update.TL_updateChannel) baseUpdate;
                 if (BuildVars.LOGS_ENABLED) {
-                    TL_update.TL_updateChannel update = (TL_update.TL_updateChannel) baseUpdate;
                     FileLog.d(baseUpdate + " channelId = " + update.channel_id);
                 }
+                GroupPrivateChatController.getInstance(currentAccount).reloadFromChannelUpdate(update.channel_id);
                 if (updatesOnMainThread == null) {
                     updatesOnMainThread = new ArrayList<>();
                 }

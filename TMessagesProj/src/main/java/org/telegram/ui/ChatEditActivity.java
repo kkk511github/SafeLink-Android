@@ -55,6 +55,7 @@ import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GroupPrivateChatController;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
@@ -146,6 +147,7 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
     private PeerColorActivity.ChangeNameColorCell colorCell;
     private TextCell autoTranslationCell;
     private TextCell historyCell;
+    private TextCell privateChatForbiddenCell;
     private TextCell reactionsCell;
     private TextInfoPrivacyCell settingsSectionCell;
 
@@ -205,6 +207,8 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
     private boolean isChannel;
 
     private boolean historyHidden;
+    private boolean privateChatForbidden;
+    private boolean privateChatForbiddenLoading;
     private TLRPC.ChatReactions availableReactions;
     private TL_stories.TL_premium_boostsStatus boostsStatus;
 
@@ -392,6 +396,7 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
         getNotificationCenter().addObserver(this, NotificationCenter.updateInterfaces);
         getNotificationCenter().addObserver(this, NotificationCenter.dialogDeleted);
         getNotificationCenter().addObserver(this, NotificationCenter.channelRightsUpdated);
+        getNotificationCenter().addObserver(this, NotificationCenter.safeLinkGroupPrivateChatForbiddenChanged);
 
         if (info != null) {
             loadLinksCount();
@@ -434,6 +439,7 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
         getNotificationCenter().removeObserver(this, NotificationCenter.updateInterfaces);
         getNotificationCenter().removeObserver(this, NotificationCenter.dialogDeleted);
         getNotificationCenter().removeObserver(this, NotificationCenter.channelRightsUpdated);
+        getNotificationCenter().removeObserver(this, NotificationCenter.safeLinkGroupPrivateChatForbiddenChanged);
         if (nameTextView != null) {
             nameTextView.onDestroy();
         }
@@ -1150,6 +1156,32 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
                 });
             }
 
+            if (ChatObject.isMegagroup(currentChat) && ChatObject.canChangeChatInfo(currentChat)) {
+                privateChatForbidden = GroupPrivateChatController.getInstance(currentAccount).isForbidden(chatId);
+                privateChatForbiddenCell = new TextCell(context, 23, false, true, null);
+                privateChatForbiddenCell.setBackground(Theme.getSelectorDrawable(true));
+                privateChatForbiddenCell.setTextAndCheckAndIcon(getString(R.string.SafeLinkGroupPrivateChatForbidden), privateChatForbidden, R.drawable.msg_block, false);
+                typeEditContainer.addView(privateChatForbiddenCell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+                privateChatForbiddenCell.setOnClickListener(v -> {
+                    if (privateChatForbiddenLoading || currentChat == null) {
+                        return;
+                    }
+                    privateChatForbiddenLoading = true;
+                    final boolean newValue = !privateChatForbidden;
+                    ((TextCell) v).setChecked(newValue);
+                    GroupPrivateChatController.getInstance(currentAccount).setForbidden(chatId, currentChat, newValue, (enabled, error) -> {
+                        privateChatForbiddenLoading = false;
+                        if (error != null) {
+                            BulletinFactory.of(this).createErrorBulletin(error.text).show();
+                        } else {
+                            privateChatForbidden = enabled;
+                        }
+                        updatePrivateChatForbiddenCell(true);
+                    });
+                });
+                loadPrivateChatForbidden();
+            }
+
             updateColorCell();
         }
 
@@ -1734,6 +1766,12 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
                     removeSelfFromStack();
                 }
             }
+        } else if (id == NotificationCenter.safeLinkGroupPrivateChatForbiddenChanged) {
+            long updatedChatId = (long) args[0];
+            if (updatedChatId == chatId) {
+                privateChatForbidden = (boolean) args[1];
+                updatePrivateChatForbiddenCell(true);
+            }
         } else if (id == NotificationCenter.chatAvailableReactionsUpdated) {
             long chatId = (long) args[0];
             if (chatId == this.chatId) {
@@ -2179,7 +2217,27 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
             if (channelAffiliateProgramsCell != null && getMessagesController().starrefConnectAllowed && ChatObject.isChannelAndNotMegaGroup(currentChat)) {
                 channelAffiliateProgramsCell.setVisibility(View.VISIBLE);
             }
+            loadPrivateChatForbidden();
         }
+    }
+
+    private void loadPrivateChatForbidden() {
+        if (currentChat == null || privateChatForbiddenCell == null) {
+            return;
+        }
+        GroupPrivateChatController.getInstance(currentAccount).load(chatId, currentChat, enabled -> {
+            privateChatForbidden = enabled;
+            updatePrivateChatForbiddenCell(true);
+        });
+    }
+
+    private void updatePrivateChatForbiddenCell(boolean animated) {
+        if (privateChatForbiddenCell == null) {
+            return;
+        }
+        boolean visible = currentChat != null && ChatObject.isMegagroup(currentChat) && ChatObject.canChangeChatInfo(currentChat);
+        privateChatForbiddenCell.setVisibility(visible ? View.VISIBLE : View.GONE);
+        privateChatForbiddenCell.setTextAndCheckAndIcon(getString(R.string.SafeLinkGroupPrivateChatForbidden), privateChatForbidden, R.drawable.msg_block, false);
     }
 
     private void updateFields(boolean updateChat, boolean animated) {
@@ -2192,7 +2250,7 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
         boolean isPrivate = !ChatObject.isPublic(currentChat);
 
         if (settingsSectionCell != null) {
-            settingsSectionCell.setVisibility(/*signCell == null && */typeCell == null && (linkedCell == null || linkedCell.getVisibility() != View.VISIBLE) && (historyCell == null || historyCell.getVisibility() != View.VISIBLE) && (locationCell == null || locationCell.getVisibility() != View.VISIBLE) ? View.GONE : View.VISIBLE);
+            settingsSectionCell.setVisibility(/*signCell == null && */typeCell == null && (linkedCell == null || linkedCell.getVisibility() != View.VISIBLE) && (historyCell == null || historyCell.getVisibility() != View.VISIBLE) && (locationCell == null || locationCell.getVisibility() != View.VISIBLE) && (privateChatForbiddenCell == null || privateChatForbiddenCell.getVisibility() != View.VISIBLE) ? View.GONE : View.VISIBLE);
         }
 
         if (logCell != null) {
@@ -2275,6 +2333,8 @@ public class ChatEditActivity extends BaseFragment implements ImageUpdater.Image
             historyCell.setEnabled(!forum);
             updateHistoryShow(!forum && isPrivate && (info == null || info.linked_chat_id == 0) && !(info != null && info.location instanceof TLRPC.TL_channelLocation), animated);
         }
+
+        updatePrivateChatForbiddenCell(animated);
 
         if (membersCell != null) {
             if (info != null) {

@@ -117,6 +117,7 @@ public class NotificationCenter {
     public static final int archivedStickersCountDidLoad = totalEvents++;
     public static final int paymentFinished = totalEvents++;
     public static final int channelRightsUpdated = totalEvents++;
+    public static final int safeLinkGroupPrivateChatForbiddenChanged = totalEvents++;
     public static final int openArticle = totalEvents++;
     public static final int articleClosed = totalEvents++;
     public static final int updateMentionsCount = totalEvents++;

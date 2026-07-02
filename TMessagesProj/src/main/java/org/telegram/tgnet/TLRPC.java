@@ -56597,6 +56597,40 @@ public class TLRPC {
         }
     }
 
+    public static class TL_safelink_getGroupPrivateChatForbidden extends TLMethod<Bool> {
+        public static final int constructor = 0x06ebdea1;
+
+        public InputChannel channel;
+
+        @Override
+        public Bool deserializeResponseT(InputSerializedData stream, int constructor, boolean exception) {
+            return Bool.TLdeserialize(stream, constructor, exception);
+        }
+
+        public void serializeToStream(OutputSerializedData stream) {
+            stream.writeInt32(constructor);
+            channel.serializeToStream(stream);
+        }
+    }
+
+    public static class TL_safelink_toggleGroupPrivateChatForbidden extends TLMethod<Updates> {
+        public static final int constructor = 0x94ba7b67;
+
+        public InputChannel channel;
+        public boolean enabled;
+
+        @Override
+        public Updates deserializeResponseT(InputSerializedData stream, int constructor, boolean exception) {
+            return Updates.TLdeserialize(stream, constructor, exception);
+        }
+
+        public void serializeToStream(OutputSerializedData stream) {
+            stream.writeInt32(constructor);
+            channel.serializeToStream(stream);
+            stream.writeBool(enabled);
+        }
+    }
+
     public static class TL_messages_saveDefaultSendAs extends TLObject {
         public static final int constructor = 0xccfddf96;
 

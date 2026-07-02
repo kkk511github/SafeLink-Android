@@ -545,6 +545,8 @@
     <string name="ChannelSubscribers">Subscribers</string>
     <string name="ChannelBlacklist">Removed Users</string>
     <string name="ChannelPermissions">Permissions</string>
+    <string name="SafeLinkGroupPrivateChatForbidden">Disable member private chats</string>
+    <string name="SafeLinkGroupPrivateChatForbiddenToast">Only admins can be contacted from this group.</string>
     <string name="ChannelPermissionsHeader">What can members of this group do?</string>
     <string name="ChannelAddException">Add Exception</string>
     <string name="ChannelSearchException">Search Exceptions</string>

@@ -139,6 +139,7 @@ import org.telegram.messenger.DocumentObject;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GroupPrivateChatController;
 import org.telegram.messenger.FlagSecureReason;
 import org.telegram.messenger.ImageLoader;
 import org.telegram.messenger.ImageLocation;
@@ -7043,9 +7044,30 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         return onMemberClick(participant, isLong, resultOnly, null);
     }
 
+    private boolean shouldBlockGroupPrivateChat(long userId, View sourceView) {
+        if (!GroupPrivateChatController.getInstance(currentAccount).shouldBlockPrivateChatFromGroup(currentChat, chatInfo, userId)) {
+            return false;
+        }
+        if (sourceView != null) {
+            AndroidUtilities.shakeViewSpring(sourceView, -3);
+            try {
+                sourceView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            } catch (Exception ignored) {
+            }
+        }
+        BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.SafeLinkGroupPrivateChatForbiddenToast)).show();
+        return true;
+    }
+
     public boolean onMemberClick(TLRPC.ChatParticipant participant, boolean isLong, boolean resultOnly, View view) {
         if (getParentActivity() == null) {
             return false;
+        }
+        if (participant != null && GroupPrivateChatController.getInstance(currentAccount).shouldBlockPrivateChatFromGroup(currentChat, chatInfo, participant.user_id)) {
+            if (!resultOnly) {
+                shouldBlockGroupPrivateChat(participant.user_id, view);
+            }
+            return true;
         }
         if (isLong) {
             TLRPC.User user = getMessagesController().getUser(participant.user_id);

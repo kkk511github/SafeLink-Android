@@ -156,6 +156,7 @@ import org.telegram.messenger.EmojiData;
 import org.telegram.messenger.FactCheckController;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.GroupPrivateChatController;
 import org.telegram.messenger.FlagSecureReason;
 import org.telegram.messenger.HashtagSearchController;
 import org.telegram.messenger.ImageLoader;
@@ -3029,6 +3030,7 @@ public class ChatActivity extends BaseFragment implements
         loadInfo = false;
         if (currentChat != null) {
             chatInfo = getMessagesController().getChatFull(currentChat.id);
+            GroupPrivateChatController.getInstance(currentAccount).load(currentChat.id, currentChat, null);
             groupCall = getMessagesController().getGroupCall(currentChat.id, true);
             if (ChatObject.isChannel(currentChat) && !getMessagesController().isChannelAdminsLoaded(currentChat.id) && !ChatObject.isMonoForum(currentChat)) {
                 getMessagesController().loadChannelAdmins(currentChat.id, true);
@@ -22344,6 +22346,7 @@ public class ChatActivity extends BaseFragment implements
                 showGigagroupConvertAlert();
                 long prevLinkedChatId = chatInfo != null ? chatInfo.linked_chat_id : 0;
                 chatInfo = chatFull;
+                GroupPrivateChatController.getInstance(currentAccount).load(currentChat.id, currentChat, null);
                 gotChatInfo();
                 if (ChatObject.isBoostSupported(currentChat) && !ChatObject.isMonoForum(currentChat) /*chatMode != MODE_SUGGESTIONS*/) {
                     getMessagesController().getBoostsController().getBoostsStats(dialog_id, boostsStatus -> {
@@ -35104,6 +35107,21 @@ public class ChatActivity extends BaseFragment implements
         return chatInfo;
     }
 
+    private boolean shouldBlockGroupPrivateChat(long userId, View sourceView) {
+        if (!GroupPrivateChatController.getInstance(currentAccount).shouldBlockPrivateChatFromGroup(currentChat, chatInfo, userId)) {
+            return false;
+        }
+        if (sourceView != null) {
+            AndroidUtilities.shakeViewSpring(sourceView, -3);
+            try {
+                sourceView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+            } catch (Exception ignored) {
+            }
+        }
+        BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.SafeLinkGroupPrivateChatForbiddenToast)).show();
+        return true;
+    }
+
     public ChatObject.Call getGroupCall() {
         return chatMode == 0 && groupCall != null && groupCall.call instanceof TLRPC.TL_groupCall ? groupCall : null;
     }
@@ -39197,11 +39215,17 @@ public class ChatActivity extends BaseFragment implements
                 didPressInstantButton(cell, 10);
                 return;
             }
+            if (user != null && shouldBlockGroupPrivateChat(user.id, cell)) {
+                return;
+            }
             openProfile(user, ChatObject.isForum(currentChat) || isThreadChat());
         }
 
         @Override
         public boolean didLongPressUserAvatar(ChatMessageCell cell, TLRPC.User user, float touchX, float touchY) {
+            if (user != null && shouldBlockGroupPrivateChat(user.id, cell)) {
+                return true;
+            }
             if (isAvatarPreviewerEnabled()) {
                 final boolean enableMention = currentChat != null && (bottomChannelButtonsLayout == null || bottomChannelButtonsLayout.getVisibility() != View.VISIBLE) && (bottomOverlay == null || bottomOverlay.getVisibility() != View.VISIBLE);
                 final boolean enableSearchMessages = currentChat != null && (threadMessageId == 0 || isTopic) && (!ChatObject.isChannel(currentChat) || currentChat.megagroup);
@@ -39399,6 +39423,9 @@ public class ChatActivity extends BaseFragment implements
         private void openProfile(TLRPC.User user, boolean expandPhoto) {
             if (user != null) {
                 if (user.id == UserObject.VERIFY) return;
+                if (shouldBlockGroupPrivateChat(user.id, null)) {
+                    return;
+                }
                 if (user.photo == null || user.photo instanceof TLRPC.TL_userProfilePhotoEmpty) {
                     expandPhoto = false;
                 }
@@ -39427,6 +39454,9 @@ public class ChatActivity extends BaseFragment implements
 
         private void openDialog(ChatMessageCell cell, TLRPC.User user) {
             if (user != null) {
+                if (shouldBlockGroupPrivateChat(user.id, cell)) {
+                    return;
+                }
                 Bundle args = new Bundle();
                 args.putLong("user_id", user.id);
                 if (getMessagesController().checkCanOpenChat(args, ChatActivity.this, cell.getMessageObject())) {
@@ -41690,6 +41720,9 @@ public class ChatActivity extends BaseFragment implements
         } else if (uid != getUserConfig().getClientUserId()) {
             if (uid == getDialogId()) {
                 avatarContainer.openProfile(true);
+                return;
+            }
+            if (shouldBlockGroupPrivateChat(uid, null)) {
                 return;
             }
             Bundle args = new Bundle();
