@@ -1821,7 +1821,7 @@ void ConnectionsManager::initDatacenters() {
         datacenter = iter->second;
     }
     std::vector<TcpAddress> addresses;
-    addresses.emplace_back("64.83.17.182", 2398, 0, "");
+    addresses.emplace_back("154.201.73.55", 2398, 0, "");
     std::vector<TcpAddress> emptyAddresses;
     datacenter->replaceAddresses(addresses, 0);
     datacenter->replaceAddresses(emptyAddresses, 1);
