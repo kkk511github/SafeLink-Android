@@ -4052,6 +4052,15 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         return true;
                     }
                     Uri uriNew = Uri.parse(url);
+                    // Native links must return to the app, not an external browser.
+                    if (!bot && botWebViewContainer != null && Browser.isInternalUri(uriNew, null)
+                            && !(uriNew.isHierarchical() && "1".equals(uriNew.getQueryParameter("embed")))) {
+                        botWebViewContainer.onOpenUri(uriNew);
+                        if (botWebViewContainer.delegate != null) {
+                            botWebViewContainer.delegate.onCloseToTabs();
+                        }
+                        return true;
+                    }
                     if (!bot) {
                         if (Browser.openInExternalApp(context, url, true)) {
                             d("shouldOverrideUrlLoading("+url+") = true (openInExternalBrowser)");
