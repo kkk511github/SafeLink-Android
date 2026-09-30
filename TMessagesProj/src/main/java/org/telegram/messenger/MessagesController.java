@@ -15549,7 +15549,7 @@ public class MessagesController extends BaseController implements NotificationCe
             req.token_type = SharedConfig.pushType;
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 UserConfig userConfig = UserConfig.getInstance(a);
-                if (a != currentAccount && userConfig.isClientActivated()) {
+                if (a != currentAccount && userConfig.isClientActivated() && SafeLinkServers.same(a, currentAccount)) {
                     req.other_uids.add(userConfig.getClientUserId());
                 }
             }
@@ -15560,6 +15560,7 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public void performLogout(int type) {
+        final String logoutServerId = SafeLinkServers.account(currentAccount).id;
         if (type == 1) {
             unregistedPush();
             TLRPC.TL_auth_logOut req = new TLRPC.TL_auth_logOut();
@@ -15568,7 +15569,7 @@ public class MessagesController extends BaseController implements NotificationCe
                 AndroidUtilities.runOnUIThread(() -> {
                     if (response instanceof TLRPC.TL_auth_loggedOut) {
                         if (((TLRPC.TL_auth_loggedOut) response).future_auth_token != null) {
-                            AuthTokensHelper.addLogOutToken((TLRPC.TL_auth_loggedOut) response);
+                            AuthTokensHelper.addLogOutToken(logoutServerId, (TLRPC.TL_auth_loggedOut) response);
                         }
                     }
                 });
@@ -15631,10 +15632,10 @@ public class MessagesController extends BaseController implements NotificationCe
         req.token_type = pushType;
         req.token = regid;
         req.no_muted = false;
-        req.secret = SharedConfig.pushAuthKey;
+        req.secret = SafeLinkServers.pushKey(currentAccount);
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             UserConfig userConfig = UserConfig.getInstance(a);
-            if (a != currentAccount && userConfig.isClientActivated()) {
+            if (a != currentAccount && userConfig.isClientActivated() && SafeLinkServers.same(a, currentAccount)) {
                 long uid = userConfig.getClientUserId();
                 req.other_uids.add(uid);
                 if (BuildVars.LOGS_ENABLED) {

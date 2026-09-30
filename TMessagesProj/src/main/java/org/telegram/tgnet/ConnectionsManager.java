@@ -262,6 +262,7 @@ public class ConnectionsManager extends BaseController {
         if (getUserConfig().getCurrentUser() != null) {
             userPremium = getUserConfig().getCurrentUser().premium;
         }
+        configureSafeLinkServer(org.telegram.messenger.SafeLinkServers.account(currentAccount), false);
         init(SharedConfig.buildVersion(), TLRPC.LAYER, BuildVars.APP_ID, deviceModel, systemVersion, appVersion, langCode, systemLangCode, configPath, FileLog.getNetworkLogPath(), pushString, fingerprint, timezoneOffset, getUserConfig().getClientUserId(), userPremium, enablePushConnection);
     }
 
@@ -582,6 +583,13 @@ public class ConnectionsManager extends BaseController {
     public void applyDatacenterAddress(int datacenterId, String ipAddress, int port) {
         native_applyDatacenterAddress(currentAccount, datacenterId, ipAddress, port);
     }
+
+    public void configureSafeLinkServer(org.telegram.messenger.SafeLinkServer server, boolean reset) {
+        native_configureSafeLinkServer(currentAccount, server.host, server.port, server.dc, server.publicKey,
+                new java.math.BigInteger(server.fingerprint, 16).longValue(), reset);
+    }
+
+    public static native void native_configureSafeLinkServer(int account, String host, int port, int dc, String publicKey, long fingerprint, boolean reset);
 
     public int getConnectionState() {
         if (connectionState == ConnectionStateConnected && isUpdating) {

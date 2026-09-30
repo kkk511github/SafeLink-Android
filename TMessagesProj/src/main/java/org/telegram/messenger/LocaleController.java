@@ -1431,6 +1431,13 @@ public class LocaleController {
     }
 
     private String getStringInternal(String key, String fallback, int fallbackRes, int res) {
+        String safeLinkValue = SafeLinkStrings.chineseOverride(key, currentLocaleInfo != null ? currentLocaleInfo.shortName : null);
+        if (safeLinkValue == null && currentLocaleInfo != null && currentLocaleInfo.hasBaseLang()) {
+            safeLinkValue = SafeLinkStrings.chineseOverride(key, currentLocaleInfo.baseLangCode);
+        }
+        if (safeLinkValue != null) {
+            return safeLinkValue;
+        }
         String value = BuildVars.USE_CLOUD_STRINGS ? localeValues.get(key) : null;
         if (value == null) {
             if (BuildVars.USE_CLOUD_STRINGS && fallback != null) {

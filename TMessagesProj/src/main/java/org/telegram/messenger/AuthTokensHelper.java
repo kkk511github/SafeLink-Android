@@ -13,8 +13,8 @@ import java.util.ArrayList;
 
 public class AuthTokensHelper {
 
-    public static ArrayList<TLRPC.TL_auth_loggedOut> getSavedLogOutTokens() {
-        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens", Context.MODE_PRIVATE);
+    public static ArrayList<TLRPC.TL_auth_loggedOut> getSavedLogOutTokens(int account) {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + SafeLinkServers.account(account).id, Context.MODE_PRIVATE);
         int count = preferences.getInt("count", 0);
 
         if (count == 0) {
@@ -34,8 +34,8 @@ public class AuthTokensHelper {
         return tokens;
     }
 
-    public static void saveLogOutTokens(ArrayList<TLRPC.TL_auth_loggedOut> tokens) {
-        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens", Context.MODE_PRIVATE);
+    public static void saveLogOutTokens(int account, ArrayList<TLRPC.TL_auth_loggedOut> tokens) {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + SafeLinkServers.account(account).id, Context.MODE_PRIVATE);
         ArrayList<TLRPC.TL_auth_loggedOut> activeTokens = new ArrayList<>();
         preferences.edit().clear().apply();
         int date = (int) (System.currentTimeMillis() / 1000L);
@@ -55,8 +55,8 @@ public class AuthTokensHelper {
         }
     }
 
-    public static ArrayList<TLRPC.TL_auth_authorization> getSavedLogInTokens() {
-        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login", Context.MODE_PRIVATE);
+    public static ArrayList<TLRPC.TL_auth_authorization> getSavedLogInTokens(int account) {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login_" + SafeLinkServers.account(account).id, Context.MODE_PRIVATE);
         int count = preferences.getInt("count", 0);
 
         if (count == 0) {
@@ -80,20 +80,17 @@ public class AuthTokensHelper {
         return tokens;
     }
 
-    public static void saveLogInToken(TLRPC.TL_auth_authorization token) {
-        if (BuildVars.DEBUG_VERSION) {
-            FileLog.d("saveLogInToken " + new String(token.future_auth_token, StandardCharsets.UTF_8));
-        }
-        ArrayList<TLRPC.TL_auth_authorization> tokens = getSavedLogInTokens();
+    public static void saveLogInToken(int account, TLRPC.TL_auth_authorization token) {
+        ArrayList<TLRPC.TL_auth_authorization> tokens = getSavedLogInTokens(account);
         if (tokens == null) {
             tokens = new ArrayList<>();
         }
         tokens.add(0, token);
-        saveLogInTokens(tokens);
+        saveLogInTokens(account, tokens);
     }
 
-    private static void saveLogInTokens(ArrayList<TLRPC.TL_auth_authorization> tokens) {
-        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login", Context.MODE_PRIVATE);
+    private static void saveLogInTokens(int account, ArrayList<TLRPC.TL_auth_authorization> tokens) {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login_" + SafeLinkServers.account(account).id, Context.MODE_PRIVATE);
         ArrayList<TLRPC.TL_auth_authorization> activeTokens = new ArrayList<>();
         preferences.edit().clear().apply();
         for (int i = 0; i < Math.min(20, tokens.size()); i++) {
@@ -112,8 +109,8 @@ public class AuthTokensHelper {
         }
     }
 
-    public static void addLogOutToken(TLRPC.TL_auth_loggedOut response) {
-        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens", Context.MODE_PRIVATE);
+    public static void addLogOutToken(String serverId, TLRPC.TL_auth_loggedOut response) {
+        SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + serverId, Context.MODE_PRIVATE);
         int count = preferences.getInt("count", 0);
         SerializedData data = new SerializedData(response.getObjectSize());
         response.serializeToStream(data);
@@ -122,7 +119,9 @@ public class AuthTokensHelper {
     }
 
     public static void clearLogInTokens() {
-        ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login", Context.MODE_PRIVATE).edit().clear().apply();
-        ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens", Context.MODE_PRIVATE).edit().clear().apply();
+        for (SafeLinkServer server : SafeLinkServers.all()) {
+            ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_login_" + server.id, Context.MODE_PRIVATE).edit().clear().apply();
+            ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + server.id, Context.MODE_PRIVATE).edit().clear().apply();
+        }
     }
 }

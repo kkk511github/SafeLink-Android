@@ -120,32 +120,36 @@ public class PushListenerController {
                     buffer.writeBytes(bytes);
                     buffer.position(0);
 
-                    if (SharedConfig.pushAuthKeyId == null) {
-                        SharedConfig.pushAuthKeyId = new byte[8];
-                        byte[] authKeyHash = Utilities.computeSHA1(SharedConfig.pushAuthKey);
-                        System.arraycopy(authKeyHash, authKeyHash.length - 8, SharedConfig.pushAuthKeyId, 0, 8);
-                    }
                     byte[] inAuthKeyId = new byte[8];
                     buffer.readBytes(inAuthKeyId, true);
-                    if (!Arrays.equals(SharedConfig.pushAuthKeyId, inAuthKeyId)) {
-                        onDecryptError();
-                        if (BuildVars.LOGS_ENABLED) {
-                            FileLog.d(String.format(Locale.US, tag + " DECRYPT ERROR 2 k1=%s k2=%s, key=%s", Utilities.bytesToHex(SharedConfig.pushAuthKeyId), Utilities.bytesToHex(inAuthKeyId), Utilities.bytesToHex(SharedConfig.pushAuthKey)));
+                    byte[] serverPushKey = null;
+                    String pushServerId = null;
+                    for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                        if (!UserConfig.getInstance(a).isClientActivated()) continue;
+                        byte[] candidate = SafeLinkServers.pushKey(a);
+                        byte[] hash = Utilities.computeSHA1(candidate);
+                        if (Arrays.equals(Arrays.copyOfRange(hash, hash.length - 8, hash.length), inAuthKeyId)) {
+                            serverPushKey = candidate;
+                            pushServerId = SafeLinkServers.account(a).id;
+                            break;
                         }
+                    }
+                    if (serverPushKey == null) {
+                        onDecryptError();
                         return;
                     }
 
                     byte[] messageKey = new byte[16];
                     buffer.readBytes(messageKey, true);
 
-                    MessageKeyData messageKeyData = MessageKeyData.generateMessageKeyData(SharedConfig.pushAuthKey, messageKey, true, 2);
+                    MessageKeyData messageKeyData = MessageKeyData.generateMessageKeyData(serverPushKey, messageKey, true, 2);
                     Utilities.aesIgeEncryption(buffer.buffer, messageKeyData.aesKey, messageKeyData.aesIv, false, false, 24, bytes.length - 24);
 
-                    byte[] messageKeyFull = Utilities.computeSHA256(SharedConfig.pushAuthKey, 88 + 8, 32, buffer.buffer, 24, buffer.buffer.limit());
+                    byte[] messageKeyFull = Utilities.computeSHA256(serverPushKey, 88 + 8, 32, buffer.buffer, 24, buffer.buffer.limit());
                     if (!Utilities.arraysEquals(messageKey, 0, messageKeyFull, 8)) {
                         onDecryptError();
                         if (BuildVars.LOGS_ENABLED) {
-                            FileLog.d(String.format(tag + " DECRYPT ERROR 3, key = %s", Utilities.bytesToHex(SharedConfig.pushAuthKey)));
+                            FileLog.d(tag + " push authentication failed");
                         }
                         return;
                     }
@@ -185,22 +189,32 @@ public class PushListenerController {
                     }
                     long accountUserId;
                     if (userIdObject == null) {
-                        accountUserId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+                        accountUserId = 0;
+                        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                            if (UserConfig.getInstance(a).isClientActivated() && SafeLinkServers.account(a).id.equals(pushServerId)) {
+                                if (accountUserId != 0) {
+                                    onDecryptError();
+                                    return;
+                                }
+                                accountUserId = UserConfig.getInstance(a).getClientUserId();
+                            }
+                        }
                     } else {
                         if (userIdObject instanceof Long) {
                             accountUserId = (Long) userIdObject;
                         } else if (userIdObject instanceof Integer) {
                             accountUserId = (Integer) userIdObject;
                         } else if (userIdObject instanceof String) {
-                            accountUserId = Utilities.parseInt((String) userIdObject);
+                            accountUserId = Long.parseLong((String) userIdObject);
                         } else {
-                            accountUserId = UserConfig.getInstance(UserConfig.selectedAccount).getClientUserId();
+                            onDecryptError();
+                            return;
                         }
                     }
                     int account = UserConfig.selectedAccount;
                     boolean foundAccount = false;
                     for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-                        if (UserConfig.getInstance(a).getClientUserId() == accountUserId) {
+                        if (UserConfig.getInstance(a).isClientActivated() && SafeLinkServers.account(a).id.equals(pushServerId) && UserConfig.getInstance(a).getClientUserId() == accountUserId) {
                             account = a;
                             foundAccount = true;
                             break;

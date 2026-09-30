@@ -58,6 +58,12 @@ public:
     void cancelRequestsForGuid(int32_t guid);
     void bindRequestToGuid(int32_t requestToken, int32_t guid);
     void applyDatacenterAddress(uint32_t datacenterId, std::string ipAddress, uint32_t port);
+    void configureSafeLinkServer(std::string host, uint32_t port, uint32_t dc, std::string key, uint64_t fingerprint, bool reset);
+    std::string safeLinkPublicKey;
+    uint64_t safeLinkFingerprint = 0;
+    std::string safeLinkHost = "212.189.31.87";
+    uint32_t safeLinkPort = 2398;
+    uint32_t safeLinkDc = 2;
     void setDelegate(ConnectiosManagerDelegate *connectiosManagerDelegate);
     ConnectionState getConnectionState();
     void setUserId(int64_t userId);

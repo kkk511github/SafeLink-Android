@@ -213,6 +213,14 @@ void bindRequestToGuid(JNIEnv *env, jclass c, jint instanceNum, jint requestToke
     return ConnectionsManager::getInstance(instanceNum).bindRequestToGuid(requestToken, guid);
 }
 
+void configureSafeLinkServer(JNIEnv *env, jclass, jint instanceNum, jstring host, jint port, jint dc, jstring publicKey, jlong fingerprint, jboolean reset) {
+    const char *address = env->GetStringUTFChars(host, nullptr);
+    const char *key = env->GetStringUTFChars(publicKey, nullptr);
+    ConnectionsManager::getInstance(instanceNum).configureSafeLinkServer(address, port, dc, key, (uint64_t) fingerprint, reset);
+    env->ReleaseStringUTFChars(host, address);
+    env->ReleaseStringUTFChars(publicKey, key);
+}
+
 void applyDatacenterAddress(JNIEnv *env, jclass c, jint instanceNum, jint datacenterId, jstring ipAddress, jint port) {
     const char *valueStr = env->GetStringUTFChars(ipAddress, 0);
 
@@ -536,6 +544,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_cancelRequestsForGuid", "(II)V", (void *) cancelRequestsForGuid},
         {"native_bindRequestToGuid", "(III)V", (void *) bindRequestToGuid},
         {"native_applyDatacenterAddress", "(IILjava/lang/String;I)V", (void *) applyDatacenterAddress},
+        {"native_configureSafeLinkServer", "(ILjava/lang/String;IILjava/lang/String;JZ)V", (void *) configureSafeLinkServer},
         {"native_setProxySettings", "(ILjava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", (void *) setProxySettings},
         {"native_getConnectionState", "(I)I", (void *) getConnectionState},
         {"native_setUserId", "(IJ)V", (void *) setUserId},

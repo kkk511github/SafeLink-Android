@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="SafeLinkGroupPrivateChatForbidden">禁止私聊</string>
+    <string name="SafeLinkGroupPrivateChatForbiddenToast">此群已禁止與普通成員私聊</string>
+</resources>

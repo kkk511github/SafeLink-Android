@@ -437,7 +437,7 @@ void ConnectionsManager::loadConfig() {
             RAND_bytes((uint8_t *) &pushSessionId, 8);
         }
         if (currentDatacenterId == 0) {
-            currentDatacenterId = 2;
+            currentDatacenterId = safeLinkDc;
         }
         saveConfig();
     }
@@ -1811,20 +1811,54 @@ uint8_t ConnectionsManager::getIpStratagy() {
     return ipStrategy;
 }
 
+void ConnectionsManager::configureSafeLinkServer(std::string host, uint32_t port, uint32_t dc, std::string key, uint64_t fingerprint, bool reset) {
+    auto configure = [this, host, port, dc, key, fingerprint, reset] {
+        if (reset) {
+            if (currentUserId != 0) return;
+            // No request from the previous identity may survive a slot rebind,
+            // including unauthenticated OTP requests normally retained by cleanUp.
+            requestsQueue.clear();
+            runningRequests.clear();
+            waitingLoginRequests.clear();
+            quickAckIdToRequestIds.clear();
+            sessionsToDestroy.clear();
+            for (auto &item : datacenters) delete item.second;
+            datacenters.clear();
+            updatingDcSettings = false;
+            updatingDcSettingsWorkaround = false;
+            movingToDatacenterId = DEFAULT_DATACENTER_ID;
+            sendingPing = false;
+            timeDifference = 0;
+        }
+        safeLinkHost = host;
+        safeLinkPort = port;
+        safeLinkDc = dc;
+        safeLinkPublicKey = key;
+        safeLinkFingerprint = fingerprint;
+        if (reset) {
+            currentDatacenterId = dc;
+            initDatacenters();
+            saveConfig();
+        }
+    };
+    if (reset) scheduleTask(configure); else configure();
+}
+
 void ConnectionsManager::initDatacenters() {
     Datacenter *datacenter = nullptr;
-    auto iter = datacenters.find(2);
+    auto iter = datacenters.find(safeLinkDc);
     if (iter == datacenters.end()) {
-        datacenter = new Datacenter(instanceNum, 2);
-        datacenters[2] = datacenter;
+        datacenter = new Datacenter(instanceNum, safeLinkDc);
+        datacenters[safeLinkDc] = datacenter;
     } else {
         datacenter = iter->second;
     }
     std::vector<TcpAddress> addresses;
-    addresses.emplace_back("154.201.73.55", 2398, 0, "");
+    const bool ipv6 = safeLinkHost.find(':') != std::string::npos;
+    addresses.emplace_back(safeLinkHost, safeLinkPort, ipv6 ? 1 : 0, "");
     std::vector<TcpAddress> emptyAddresses;
-    datacenter->replaceAddresses(addresses, 0);
-    datacenter->replaceAddresses(emptyAddresses, 1);
+    datacenter->replaceAddresses(ipv6 ? emptyAddresses : addresses, 0);
+    datacenter->replaceAddresses(ipv6 ? addresses : emptyAddresses, 1);
     datacenter->replaceAddresses(emptyAddresses, 2);
     datacenter->replaceAddresses(emptyAddresses, 3);
     datacenter->resetAddressAndPortNum();
@@ -1997,6 +2031,7 @@ void ConnectionsManager::setUserId(int64_t userId) {
 
 void ConnectionsManager::switchBackend(bool restart) {
     scheduleTask([&, restart] {
+        if (!safeLinkPublicKey.empty()) return;
         currentDatacenterId = 1;
         testBackend = !testBackend;
         if (!restart) {
@@ -3372,6 +3407,9 @@ void ConnectionsManager::updateDcSettings(uint32_t dcNum, bool workaround, bool 
             size_t count = config->dc_options.size();
             for (uint32_t a = 0; a < count; a++) {
                 TL_dcOption *dcOption = config->dc_options[a].get();
+                if (!safeLinkPublicKey.empty() && (dcOption->id != safeLinkDc || dcOption->ip_address != safeLinkHost || dcOption->port != safeLinkPort)) {
+                    continue;
+                }
                 auto iter = map.find((uint32_t) dcOption->id);
                 DatacenterInfo *info;
                 if (iter == map.end()) {
@@ -3469,6 +3507,7 @@ void ConnectionsManager::authorizedOnMovingDatacenter() {
 }
 
 void ConnectionsManager::applyDatacenterAddress(uint32_t datacenterId, std::string ipAddress, uint32_t port) {
+    if (!safeLinkPublicKey.empty() && (datacenterId != safeLinkDc || ipAddress != safeLinkHost || port != safeLinkPort)) return;
     scheduleTask([&, datacenterId, ipAddress, port] {
         Datacenter *datacenter = getDatacenterWithId(datacenterId);
         if (datacenter != nullptr) {
@@ -3532,6 +3571,10 @@ inline bool checkPhoneByPrefixesRules(std::string phone, std::string rules) {
 
 void ConnectionsManager::applyDnsConfig(NativeByteBuffer *buffer, std::string phone, int32_t date) {
     scheduleTask([&, buffer, phone, date] {
+        if (!safeLinkPublicKey.empty()) {
+            buffer->reuse();
+            return;
+        }
         int32_t realDate = date;
         if (LOGS_ENABLED) DEBUG_D("trying to decrypt config %d", requestingSecondAddress);
         TL_help_configSimple *config = Datacenter::decodeSimpleConfig(buffer);
@@ -3638,6 +3681,7 @@ void ConnectionsManager::init(uint32_t version, int32_t layer, int32_t apiId, st
     }
 
     loadConfig();
+    currentDatacenterId = safeLinkDc;
 
     bool needLoadConfig = false;
     if (systemLangCode.compare(lastInitSystemLangcode) != 0) {

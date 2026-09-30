@@ -544,6 +544,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         }
 
         actionBar.setAddToContainer(false);
+        if (activityMode == MODE_LOGIN) {
+            actionBar.createMenu().addItem(87001, R.drawable.settings_devices).setOnClickListener(v -> presentFragment(new SafeLinkServersActivity()));
+        }
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -1669,7 +1672,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         MessagesController.getInstance(currentAccount).checkPeerColors(false);
 
         if (res.future_auth_token != null) {
-            AuthTokensHelper.saveLogInToken(res);
+            AuthTokensHelper.saveLogInToken(currentAccount, res);
         } else {
             FileLog.d("onAuthSuccess future_auth_token is empty");
         }
@@ -3055,7 +3058,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                             continue;
                         }
                         String userPhone = userConfig.getCurrentUser().phone;
-                        if (PhoneNumberUtils.compare(phone, userPhone) && ConnectionsManager.getInstance(a).isTestBackend() == testBackend) {
+                        if (org.telegram.messenger.SafeLinkServers.same(a, currentAccount) && PhoneNumberUtils.compare(phone, userPhone) && ConnectionsManager.getInstance(a).isTestBackend() == testBackend) {
                             final int num = a;
                             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                             builder.setTitle(getString(R.string.AppName));
@@ -3083,7 +3086,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 settings.allow_firebase = false;
             }
 
-            ArrayList<TLRPC.TL_auth_authorization> loginTokens = AuthTokensHelper.getSavedLogInTokens();
+            ArrayList<TLRPC.TL_auth_authorization> loginTokens = AuthTokensHelper.getSavedLogInTokens(currentAccount);
             if (loginTokens != null) {
                 for (int i = 0; i < loginTokens.size(); i++) {
                     if (loginTokens.get(i).future_auth_token == null) {
@@ -3101,7 +3104,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                     }
                 }
             }
-            ArrayList<TLRPC.TL_auth_loggedOut> tokens = AuthTokensHelper.getSavedLogOutTokens();
+            ArrayList<TLRPC.TL_auth_loggedOut> tokens = AuthTokensHelper.getSavedLogOutTokens(currentAccount);
             if (tokens != null) {
                 for (int i = 0; i < tokens.size(); i++) {
                     if (settings.logout_tokens == null) {
@@ -3112,7 +3115,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         break;
                     }
                 }
-                AuthTokensHelper.saveLogOutTokens(tokens);
+                AuthTokensHelper.saveLogOutTokens(currentAccount, tokens);
             }
             if (settings.logout_tokens != null) {
                 settings.flags |= 64;
@@ -3433,7 +3436,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         if (!userConfig.isClientActivated()) {
                             continue;
                         }
-                        if (userConfig.getClientUserId() == userId && ConnectionsManager.getInstance(a).isTestBackend() == testBackend) {
+                        if (org.telegram.messenger.SafeLinkServers.same(a, currentAccount) && userConfig.getClientUserId() == userId && ConnectionsManager.getInstance(a).isTestBackend() == testBackend) {
                             if (UserConfig.selectedAccount != a) {
                                 ((LaunchActivity) getParentActivity()).switchToAccount(a, true);
                             }
