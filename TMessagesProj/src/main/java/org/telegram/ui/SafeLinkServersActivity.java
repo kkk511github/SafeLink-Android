@@ -19,8 +19,12 @@ public final class SafeLinkServersActivity extends BaseFragment {
     public View createView(Context context) {
         actionBar.setTitle("服务器与账号");
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
+        actionBar.createMenu().addItem(1, R.drawable.msg_add);
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
-            @Override public void onItemClick(int id) { if (id == -1) finishFragment(); }
+            @Override public void onItemClick(int id) {
+                if (id == -1) finishFragment();
+                else if (id == 1) addServer();
+            }
         });
         FrameLayout content = new FrameLayout(context);
         content.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
@@ -44,15 +48,26 @@ public final class SafeLinkServersActivity extends BaseFragment {
         actions.clear();
         try {
             for (SafeLinkServer server : SafeLinkServers.all()) {
-                items.add(UItem.asHeader(server.name));
-                row(items, server.host + ":" + server.port, "", () -> alert("公钥 SHA-256\n" + server.id + "\n\nMTProto 指纹\n" + server.fingerprint));
+                int count = 0;
+                boolean current = false;
+                for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                    if (UserConfig.getInstance(a).isClientActivated() && SafeLinkServers.account(a).id.equals(server.id)) {
+                        count++;
+                        current |= a == UserConfig.selectedAccount;
+                    }
+                }
+                items.add(UItem.asHeader(server.name + (current ? " · 当前服务器" : "") + " · " + count + " 个账号"));
+                row(items, "服务器信息", server.host + ":" + server.port, () -> alert(server.name + "\n" + server.host + ":" + server.port + "\n\n公钥 SHA-256\n" + server.id + "\n\nMTProto 指纹\n" + server.fingerprint));
                 for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                     final int account = a;
                     if (UserConfig.getInstance(a).isClientActivated() && SafeLinkServers.account(a).id.equals(server.id)) {
                         AccountSelectCell cell = new AccountSelectCell(getContext(), false);
                         cell.setAccount(account, true);
+                        String username = UserConfig.getInstance(account).getCurrentUser().username;
+                        cell.setAccountDetails(username == null || username.isEmpty() ? "" : "@" + username);
                         cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                         cell.setOnClickListener(view -> {
+                            if (account == UserConfig.selectedAccount) return;
                             if (LaunchActivity.instance != null) LaunchActivity.instance.switchToAccount(account, true);
                         });
                         items.add(UItem.asCustom(cell));

@@ -142,4 +142,19 @@ public class AccountSelectCell extends FrameLayout {
     public int getAccountNumber() {
         return accountNumber;
     }
+
+    public void setAccountDetails(String details) {
+        if (checkImageView == null || details == null || details.isEmpty()) return;
+        textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+        textView.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 22, Gravity.LEFT | Gravity.TOP, 61, 7, 52, 0));
+        if (infoTextView == null) {
+            infoTextView = new TextView(getContext());
+            infoTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            infoTextView.setSingleLine(true);
+            infoTextView.setEllipsize(TextUtils.TruncateAt.END);
+            addView(infoTextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 20, Gravity.LEFT | Gravity.TOP, 61, 30, 52, 0));
+        }
+        infoTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2));
+        infoTextView.setText(details);
+    }
 }
