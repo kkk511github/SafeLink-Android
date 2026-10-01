@@ -3124,17 +3124,29 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 settings.allow_firebase = false;
             }
 
+            settings.logout_tokens = new ArrayList<>();
+            ArrayList<TLRPC.TL_auth_loggedOut> tokens = AuthTokensHelper.getSavedLogOutTokens(currentAccount);
+            if (tokens != null) {
+                for (TLRPC.TL_auth_loggedOut token : tokens) {
+                    if (settings.logout_tokens.size() >= 20) {
+                        break;
+                    }
+                    if (token.future_auth_token != null && token.future_auth_token.length != 0) {
+                        settings.logout_tokens.add(token.future_auth_token);
+                    }
+                }
+            }
             ArrayList<TLRPC.TL_auth_authorization> loginTokens = AuthTokensHelper.getSavedLogInTokens(currentAccount);
             if (loginTokens != null) {
                 for (int i = 0; i < loginTokens.size(); i++) {
+                    if (settings.logout_tokens.size() >= 20) {
+                        break;
+                    }
                     if (loginTokens.get(i).future_auth_token == null) {
                         continue;
                     }
                     if (settings.logout_tokens == null) {
                         settings.logout_tokens = new ArrayList<>();
-                    }
-                    if (BuildVars.DEBUG_VERSION) {
-                        FileLog.d("login token to check " + new String(loginTokens.get(i).future_auth_token, StandardCharsets.UTF_8));
                     }
                     settings.logout_tokens.add(loginTokens.get(i).future_auth_token);
                     if (settings.logout_tokens.size() >= 20) {
@@ -3142,20 +3154,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                     }
                 }
             }
-            ArrayList<TLRPC.TL_auth_loggedOut> tokens = AuthTokensHelper.getSavedLogOutTokens(currentAccount);
-            if (tokens != null) {
-                for (int i = 0; i < tokens.size(); i++) {
-                    if (settings.logout_tokens == null) {
-                        settings.logout_tokens = new ArrayList<>();
-                    }
-                    settings.logout_tokens.add(tokens.get(i).future_auth_token);
-                    if (settings.logout_tokens.size() >= 20) {
-                        break;
-                    }
-                }
-                AuthTokensHelper.saveLogOutTokens(currentAccount, tokens);
-            }
-            if (settings.logout_tokens != null) {
+            if (!settings.logout_tokens.isEmpty()) {
                 settings.flags |= 64;
             }
             SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
@@ -7752,6 +7751,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
     public class LoginActivityRegisterView extends SlideView implements ImageUpdater.ImageUpdaterDelegate {
         private OutlineTextContainerView firstNameOutlineView, lastNameOutlineView;
+        private OutlineTextContainerView inviteOutlineView;
+        private EditTextBoldCursor inviteField;
 
         private EditTextBoldCursor firstNameField;
         private EditTextBoldCursor lastNameField;
@@ -8050,6 +8051,30 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             });
             buildEditTextLayout(AndroidUtilities.isSmallScreen());
 
+            inviteOutlineView = new OutlineTextContainerView(context);
+            inviteOutlineView.setText(getString(R.string.SafeLinkRegistrationInvite));
+            inviteField = new EditTextBoldCursor(context);
+            inviteField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
+            inviteField.setSingleLine(true);
+            inviteField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            inviteField.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
+            inviteField.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+            inviteField.setBackground(null);
+            inviteField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
+            inviteField.setOnFocusChangeListener((v, focused) -> inviteOutlineView.animateSelection(focused ? 1f : 0f));
+            inviteField.setOnEditorActionListener((v, action, event) -> {
+                if (action == EditorInfo.IME_ACTION_DONE) { onNextPressed(null); return true; }
+                return false;
+            });
+            lastNameField.setImeOptions(EditorInfo.IME_ACTION_NEXT | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+            lastNameField.setOnEditorActionListener((v, action, event) -> {
+                if (action == EditorInfo.IME_ACTION_NEXT) { inviteField.requestFocus(); return true; }
+                return false;
+            });
+            inviteOutlineView.attachEditText(inviteField);
+            inviteOutlineView.addView(inviteField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            addView(inviteOutlineView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 16, 8, 0));
+
             wrongNumber = new TextView(context);
             wrongNumber.setText(getString("CancelRegistration", R.string.CancelRegistration));
             wrongNumber.setGravity((LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_HORIZONTAL);
@@ -8097,6 +8122,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             firstNameField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated));
             lastNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
             lastNameField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated));
+            inviteField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            inviteField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated));
+            inviteOutlineView.updateColor();
             wrongNumber.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
             privacyView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText6));
             privacyView.setLinkTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteLinkText));
@@ -8271,6 +8299,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             }
             firstNameField.setText("");
             lastNameField.setText("");
+            inviteField.setText("");
             requestPhone = params.getString("phoneFormated");
             phoneHash = params.getString("phoneHash");
             currentParams = params;
@@ -8292,6 +8321,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             nextPressed = true;
             TLRPC.TL_auth_signUp req = new TLRPC.TL_auth_signUp();
             req.phone_code_hash = phoneHash;
+            String invite = inviteField.getText().toString().trim();
+            if (!invite.isEmpty()) { req.phone_code_hash += ":safelink-invite:" + invite; }
             req.phone_number = requestPhone;
             req.first_name = firstNameField.getText().toString();
             req.last_name = lastNameField.getText().toString();
@@ -8320,6 +8351,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         onBackPressed(true);
                         setPage(VIEW_PHONE_INPUT, true, null, true);
                         needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), getString("CodeExpired", R.string.CodeExpired));
+                    } else if (error.text.contains("INVITE_CODE_REQUIRED") || error.text.contains("INVITE_CODE_INVALID")) {
+                        onFieldError(inviteOutlineView, true);
+                        inviteField.requestFocus();
+                        needShowAlert(getString(R.string.SafeLinkRegistrationInvite), getString(error.text.contains("INVITE_CODE_REQUIRED") ? R.string.SafeLinkRegistrationInviteRequired : R.string.SafeLinkRegistrationInviteInvalid));
                     } else if (error.text.contains("FIRSTNAME_INVALID")) {
                         needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), getString("InvalidFirstName", R.string.InvalidFirstName));
                     } else if (error.text.contains("LASTNAME_INVALID")) {
@@ -8341,6 +8376,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             if (last.length() != 0) {
                 bundle.putString("registerview_last", last);
             }
+            bundle.putString("registerview_invite", inviteField.getText().toString());
             if (currentTermsOfService != null) {
                 SerializedData data = new SerializedData(currentTermsOfService.getObjectSize());
                 currentTermsOfService.serializeToStream(data);
@@ -8382,6 +8418,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             if (last != null) {
                 lastNameField.setText(last);
             }
+            inviteField.setText(bundle.getString("registerview_invite", ""));
         }
 
         private void hidePrivacyView() {

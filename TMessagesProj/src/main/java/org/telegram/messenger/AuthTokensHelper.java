@@ -15,7 +15,7 @@ public class AuthTokensHelper {
 
     public static ArrayList<TLRPC.TL_auth_loggedOut> getSavedLogOutTokens(int account) {
         SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + SafeLinkServers.account(account).id, Context.MODE_PRIVATE);
-        int count = preferences.getInt("count", 0);
+        int count = Math.min(20, Math.max(0, preferences.getInt("count", 0)));
 
         if (count == 0) {
             return null;
@@ -24,10 +24,15 @@ public class AuthTokensHelper {
         ArrayList<TLRPC.TL_auth_loggedOut> tokens = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             String value = preferences.getString("log_out_token_" + i, "");
-            SerializedData serializedData = new SerializedData(Utilities.hexToBytes(value));
-            TLRPC.TL_auth_loggedOut token = TLRPC.TL_auth_loggedOut.TLdeserialize(serializedData, serializedData.readInt32(true), true);
-            if (token != null) {
-                tokens.add(token);
+            try {
+                SerializedData serializedData = new SerializedData(Utilities.hexToBytes(value));
+                TLRPC.TL_auth_loggedOut token = TLRPC.TL_auth_loggedOut.TLdeserialize(serializedData, serializedData.readInt32(true), true);
+                if (token != null && token.future_auth_token != null && token.future_auth_token.length > 0) {
+                    tokens.add(token);
+                }
+                serializedData.cleanup();
+            } catch (Exception e) {
+                FileLog.e(e);
             }
         }
 
@@ -110,11 +115,18 @@ public class AuthTokensHelper {
     }
 
     public static void addLogOutToken(String serverId, TLRPC.TL_auth_loggedOut response) {
+        if (response.future_auth_token == null || response.future_auth_token.length == 0) {
+            return;
+        }
         SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("saved_tokens_" + serverId, Context.MODE_PRIVATE);
-        int count = preferences.getInt("count", 0);
+        int count = Math.min(19, Math.max(0, preferences.getInt("count", 0)));
+        SharedPreferences.Editor editor = preferences.edit();
+        for (int i = count; i > 0; i--) {
+            editor.putString("log_out_token_" + i, preferences.getString("log_out_token_" + (i - 1), ""));
+        }
         SerializedData data = new SerializedData(response.getObjectSize());
         response.serializeToStream(data);
-        preferences.edit().putString("log_out_token_" + count, Utilities.bytesToHex(data.toByteArray())).putInt("count", count + 1).apply();
+        editor.putString("log_out_token_0", Utilities.bytesToHex(data.toByteArray())).putInt("count", count + 1).apply();
         BackupAgent.requestBackup(ApplicationLoader.applicationContext);
     }
 

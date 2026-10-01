@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="SafeLinkServersAndAccounts">服务器与账号</string>
+    <string name="SafeLinkRegistrationInvite">注册邀请码</string>
+    <string name="SafeLinkRegistrationInviteRequired">此服务器已开启邀请注册，请填写邀请码。</string>
+    <string name="SafeLinkRegistrationInviteInvalid">邀请码无效、已过期或名额已用完，请联系管理员。</string>
     <string name="AppName">Telegram</string>
     <string name="AppNameBeta">Telegram Beta</string>
     <string name="LanguageName">English</string>
