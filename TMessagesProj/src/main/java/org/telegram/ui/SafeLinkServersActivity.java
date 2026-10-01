@@ -14,10 +14,19 @@ public final class SafeLinkServersActivity extends BaseFragment {
     private UniversalRecyclerView list;
     private final HashMap<Integer, Runnable> actions = new HashMap<>();
     private boolean discovering;
+    private LoginActivity sourceLogin;
+
+    public SafeLinkServersActivity() {
+    }
+
+    public SafeLinkServersActivity(LoginActivity sourceLogin) {
+        this.sourceLogin = sourceLogin;
+        currentAccount = sourceLogin.getCurrentAccount();
+    }
 
     @Override
     public View createView(Context context) {
-        actionBar.setTitle("服务器与账号");
+        actionBar.setTitle(LocaleController.getString(R.string.SafeLinkServersAndAccounts));
         actionBar.setBackButtonImage(R.drawable.ic_ab_back);
         actionBar.createMenu().addItem(1, R.drawable.msg_add);
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
@@ -49,11 +58,10 @@ public final class SafeLinkServersActivity extends BaseFragment {
         try {
             for (SafeLinkServer server : SafeLinkServers.all()) {
                 int count = 0;
-                boolean current = false;
+                boolean current = SafeLinkServers.account(currentAccount).id.equals(server.id);
                 for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                     if (UserConfig.getInstance(a).isClientActivated() && SafeLinkServers.account(a).id.equals(server.id)) {
                         count++;
-                        current |= a == UserConfig.selectedAccount;
                     }
                 }
                 items.add(UItem.asHeader(server.name + (current ? " · 当前服务器" : "") + " · " + count + " 个账号"));
@@ -67,7 +75,14 @@ public final class SafeLinkServersActivity extends BaseFragment {
                         cell.setAccountDetails(username == null || username.isEmpty() ? "" : "@" + username);
                         cell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
                         cell.setOnClickListener(view -> {
-                            if (account == UserConfig.selectedAccount) return;
+                            if (account == UserConfig.selectedAccount) {
+                                if (sourceLogin != null) {
+                                    sourceLogin.discardForServerSwitch();
+                                    sourceLogin = null;
+                                }
+                                finishFragment();
+                                return;
+                            }
                             if (LaunchActivity.instance != null) LaunchActivity.instance.switchToAccount(account, true);
                         });
                         items.add(UItem.asCustom(cell));
@@ -85,7 +100,11 @@ public final class SafeLinkServersActivity extends BaseFragment {
     private void addAccount(SafeLinkServer server) {
         try {
             int count = 0;
-            int slot = -1;
+            if (sourceLogin != null && UserConfig.getInstance(sourceLogin.getCurrentAccount()).isClientActivated()) {
+                alert("此账号已完成登录，请返回后重新打开服务器与账号。");
+                return;
+            }
+            int slot = sourceLogin != null ? sourceLogin.getCurrentAccount() : -1;
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (UserConfig.getInstance(a).isClientActivated()) count++;
                 else if (slot == -1) slot = a;
@@ -95,7 +114,17 @@ public final class SafeLinkServersActivity extends BaseFragment {
                 return;
             }
             SafeLinkServers.bindForLogin(slot, server);
-            presentFragment(new LoginActivity(slot));
+            boolean replaceSelector = sourceLogin != null || count == 0;
+            LoginActivity next;
+            if (sourceLogin != null) {
+                next = sourceLogin.replacementForServer();
+                sourceLogin.discardForServerSwitch();
+                sourceLogin = null;
+            } else {
+                next = count == 0 ? new LoginActivity() : new LoginActivity(slot);
+                next.setCurrentAccount(slot);
+            }
+            presentFragment(next, replaceSelector);
         } catch (Exception error) { alert(error.getMessage()); }
     }
 

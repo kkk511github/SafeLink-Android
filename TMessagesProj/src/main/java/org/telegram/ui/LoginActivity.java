@@ -332,6 +332,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
     private boolean checkPermissions = true;
     private boolean checkShowPermissions = true;
     private boolean newAccount;
+    private boolean serverLoginDiscarded;
     private boolean syncContacts = true;
     private boolean testBackend = false;
 
@@ -360,6 +361,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
     private RadialProgressView radialProgressView;
 
     private ImageView proxyButtonView;
+    private ImageView serversButtonView;
     private ProxyDrawable proxyDrawable;
 
     // Open animation stuff
@@ -544,9 +546,6 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         }
 
         actionBar.setAddToContainer(false);
-        if (activityMode == MODE_LOGIN) {
-            actionBar.createMenu().addItem(87001, R.drawable.settings_devices).setOnClickListener(v -> presentFragment(new SafeLinkServersActivity()));
-        }
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
@@ -588,6 +587,11 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
                 marginLayoutParams = (MarginLayoutParams) radialProgressView.getLayoutParams();
                 marginLayoutParams.topMargin = AndroidUtilities.dp(16) + statusBarHeight;
+
+                if (serversButtonView != null) {
+                    marginLayoutParams = (MarginLayoutParams) serversButtonView.getLayoutParams();
+                    marginLayoutParams.topMargin = AndroidUtilities.dp(10) + statusBarHeight;
+                }
 
                 if (emailChangeSkipButton != null) {
                     marginLayoutParams = (MarginLayoutParams) emailChangeSkipButton.getLayoutParams();
@@ -774,6 +778,21 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         proxyButtonView.setVisibility(View.GONE);
         sizeNotifierFrameLayout.addView(proxyButtonView, LayoutHelper.createFrame(32, 32, Gravity.RIGHT | Gravity.TOP, 16, 16, 16, 16));
         updateProxyButton(false, true);
+
+        if (activityMode == MODE_LOGIN) {
+            serversButtonView = new ImageView(context);
+            serversButtonView.setImageResource(R.drawable.settings_devices);
+            serversButtonView.setPadding(dp(10), dp(10), dp(10), dp(10));
+            serversButtonView.setContentDescription(getString(R.string.SafeLinkServersAndAccounts));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                serversButtonView.setTooltipText(getString(R.string.SafeLinkServersAndAccounts));
+            }
+            serversButtonView.setOnClickListener(v -> {
+                AndroidUtilities.hideKeyboard(fragmentView);
+                presentFragment(new SafeLinkServersActivity(this));
+            });
+            sizeNotifierFrameLayout.addView(serversButtonView, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.TOP, 0, 10, 56, 0));
+        }
 
         radialProgressView = new RadialProgressView(context);
         radialProgressView.setSize(AndroidUtilities.dp(20));
@@ -1029,6 +1048,19 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             FileLog.e(e);
         }
         return null;
+    }
+
+    LoginActivity replacementForServer() {
+        LoginActivity result = newAccount ? new LoginActivity(currentAccount) : new LoginActivity();
+        result.setCurrentAccount(currentAccount);
+        return result;
+    }
+
+    void discardForServerSwitch() {
+        serverLoginDiscarded = true;
+        needHideProgress(true, false);
+        clearCurrentState();
+        removeSelfFromStack();
     }
 
     private void clearCurrentState() {
@@ -1578,6 +1610,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
     @Override
     public void saveSelfArgs(Bundle outState) {
+        if (serverLoginDiscarded) {
+            return;
+        }
         try {
             Bundle bundle = new Bundle();
             bundle.putInt("currentViewNum", currentViewNum);
@@ -1652,6 +1687,9 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
     private boolean pendingSwitchingAccount;
 
     private void onAuthSuccess(TLRPC.TL_auth_authorization res, boolean afterSignup) {
+        if (serverLoginDiscarded || isFinished) {
+            return;
+        }
         MessagesController.getInstance(currentAccount).cleanup();
         ConnectionsManager.getInstance(currentAccount).setUserId(res.user.id);
         UserConfig.getInstance(currentAccount).clearConfig();
@@ -8465,6 +8503,11 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
     private void updateColors() {
         fragmentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+
+        if (serversButtonView != null) {
+            serversButtonView.setColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            serversButtonView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector)));
+        }
 
         backButtonView.setColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         backButtonView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector)));

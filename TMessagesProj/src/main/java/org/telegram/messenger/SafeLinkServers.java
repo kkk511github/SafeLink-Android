@@ -54,6 +54,12 @@ public final class SafeLinkServers {
         if (UserConfig.getInstance(account).isClientActivated()) throw new IllegalStateException("不能修改已登录账号的服务器");
         ConnectionsManager manager = ConnectionsManager.getInstance(account);
         save(server);
+        // Login challenges belong to one server, even when an account slot is reused.
+        SharedPreferences login = ApplicationLoader.applicationContext.getSharedPreferences("logininfo2_" + account, Context.MODE_PRIVATE);
+        if (!login.edit().clear().commit()) throw new IllegalStateException("无法清除旧服务器的登录状态");
+        if (account == UserConfig.selectedAccount && !ApplicationLoader.applicationContext.getSharedPreferences("logininfo2", Context.MODE_PRIVATE).edit().clear().commit()) {
+            throw new IllegalStateException("无法清除旧服务器的登录状态");
+        }
         if (!preferences().edit().putString("account_" + account, server.json()).commit()) throw new IllegalStateException("保存失败");
         UserConfig.getInstance(account).registeredForPush = false;
         manager.cleanup(true);
