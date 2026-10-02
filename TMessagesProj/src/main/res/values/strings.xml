@@ -6,8 +6,8 @@
     <string name="SafeLinkRegistrationInviteMandatoryHint">邀请码（必填）</string>
     <string name="SafeLinkRegistrationInviteRequired">此服务器已开启邀请注册，请填写邀请码。</string>
     <string name="SafeLinkRegistrationInviteInvalid">邀请码无效、已过期或名额已用完，请联系管理员。</string>
-    <string name="AppName">Telegram</string>
-    <string name="AppNameBeta">Telegram Beta</string>
+    <string name="AppName">SafeLink</string>
+    <string name="AppNameBeta">SafeLink</string>
     <string name="LanguageName">English</string>
     <string name="English">English</string>
     <string name="LanguageNameInEnglish">English</string>
