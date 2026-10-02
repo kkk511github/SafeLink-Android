@@ -48,6 +48,7 @@ import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -238,6 +239,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     @Override
     public void onResume() {
         super.onResume();
+        checkRegistrationPassword();
         blur3_updateColors();
         checkContactsTabBadge();
         checkUnreadCount(true);
@@ -836,6 +838,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
+        if (id == NotificationCenter.appConfigUpdated) {
+            checkRegistrationPassword();
+            return;
+        }
         if (id == NotificationCenter.notificationsCountUpdated || id == NotificationCenter.updateInterfaces) {
             checkUnreadCount(fragmentView != null && fragmentView.isAttachedToWindow());
         } else if (id == NotificationCenter.appUpdateLoading) {
@@ -895,6 +901,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     @Override
     public boolean onFragmentCreate() {
         observersGroup = NotificationCenter.getInstance(currentAccount).createObserversGroup(this)
+            .add(NotificationCenter.appConfigUpdated)
             .add(NotificationCenter.fileLoaded)
             .add(NotificationCenter.fileLoadProgressChanged)
             .add(NotificationCenter.fileLoadFailed)
@@ -910,6 +917,34 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             .add(NotificationCenter.needSetDayNightTheme);
 
         return super.onFragmentCreate();
+    }
+
+    private boolean registrationPasswordChecking;
+
+    private void checkRegistrationPassword() {
+        if (registrationPasswordChecking || isFinished || getParentActivity() == null || getParentLayout() == null
+                || getParentLayout().getLastFragment() != this
+                || !MessagesController.getMainSettings(currentAccount).getBoolean("safelink_registration_password_required", false)) {
+            return;
+        }
+        registrationPasswordChecking = true;
+        getConnectionsManager().sendRequest(new TL_account.getPassword(), (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+            registrationPasswordChecking = false;
+            if (isFinished || getParentLayout() == null || getParentLayout().getLastFragment() != this || !(response instanceof TL_account.Password)) {
+                return;
+            }
+            TL_account.Password password = (TL_account.Password) response;
+            if (password.has_password && TextUtils.isEmpty(password.email_unconfirmed_pattern)) {
+                MessagesController.getMainSettings(currentAccount).edit().putBoolean("safelink_registration_password_required", false).apply();
+                getMessagesController().loadAppConfig(true);
+                return;
+            }
+            int type = TextUtils.isEmpty(password.email_unconfirmed_pattern) ? TwoStepVerificationSetupActivity.TYPE_INTRO : TwoStepVerificationSetupActivity.TYPE_EMAIL_CONFIRM;
+            TwoStepVerificationSetupActivity setup = new TwoStepVerificationSetupActivity(currentAccount, type, password);
+            setup.setBlockingAlert(0);
+            setup.setFromRegistration(true);
+            presentFragment(setup);
+        }));
     }
 
     @Override

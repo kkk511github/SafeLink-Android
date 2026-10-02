@@ -1652,8 +1652,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 pendingSwitchingAccount = false;
                 finishFragment();
             } else {
-                if (afterSignup && showSetPasswordConfirm) {
-                    TwoStepVerificationSetupActivity twoStepVerification = new TwoStepVerificationSetupActivity(TwoStepVerificationSetupActivity.TYPE_INTRO, null);
+                if (showSetPasswordConfirm) {
+                    TwoStepVerificationSetupActivity twoStepVerification = new TwoStepVerificationSetupActivity(currentAccount, TwoStepVerificationSetupActivity.TYPE_INTRO, null);
                     twoStepVerification.setBlockingAlert(otherwiseRelogin);
                     twoStepVerification.setFromRegistration(true);
                     presentFragment(twoStepVerification, true);
@@ -1697,6 +1697,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         UserConfig.getInstance(currentAccount).syncContacts = syncContacts;
         UserConfig.getInstance(currentAccount).setCurrentUser(res.user);
         UserConfig.getInstance(currentAccount).saveConfig(true);
+        MessagesController.getMainSettings(currentAccount).edit().putBoolean("safelink_registration_password_required", res.setup_password_required && res.otherwise_relogin_days == 0).apply();
         MessagesStorage.getInstance(currentAccount).cleanup(true);
         ArrayList<TLRPC.User> users = new ArrayList<>();
         users.add(res.user);
@@ -7753,6 +7754,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         private OutlineTextContainerView firstNameOutlineView, lastNameOutlineView;
         private OutlineTextContainerView inviteOutlineView;
         private EditTextBoldCursor inviteField;
+        private int invitePolicyRequestId;
 
         private EditTextBoldCursor firstNameField;
         private EditTextBoldCursor lastNameField;
@@ -8052,8 +8054,11 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             buildEditTextLayout(AndroidUtilities.isSmallScreen());
 
             inviteOutlineView = new OutlineTextContainerView(context);
-            inviteOutlineView.setText(getString(R.string.SafeLinkRegistrationInvite));
+            inviteOutlineView.setForceUseCenter2(true);
             inviteField = new EditTextBoldCursor(context);
+            inviteField.setHint(getString(R.string.SafeLinkRegistrationInvite));
+            inviteField.setCursorSize(AndroidUtilities.dp(20));
+            inviteField.setCursorWidth(1.5f);
             inviteField.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
             inviteField.setSingleLine(true);
             inviteField.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
@@ -8061,7 +8066,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             inviteField.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
             inviteField.setBackground(null);
             inviteField.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16), AndroidUtilities.dp(16));
-            inviteField.setOnFocusChangeListener((v, focused) -> inviteOutlineView.animateSelection(focused ? 1f : 0f));
+            inviteField.setOnFocusChangeListener((v, focused) -> inviteOutlineView.animateSelection(focused ? 1f : 0f, 0f));
             inviteField.setOnEditorActionListener((v, action, event) -> {
                 if (action == EditorInfo.IME_ACTION_DONE) { onNextPressed(null); return true; }
                 return false;
@@ -8073,7 +8078,8 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             });
             inviteOutlineView.attachEditText(inviteField);
             inviteOutlineView.addView(inviteField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-            addView(inviteOutlineView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 8, 16, 8, 0));
+            int inviteSideMargin = AndroidUtilities.isSmallScreen() ? 8 : 16;
+            addView(inviteOutlineView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, inviteSideMargin, 16, inviteSideMargin, 0));
 
             wrongNumber = new TextView(context);
             wrongNumber.setText(getString("CancelRegistration", R.string.CancelRegistration));
@@ -8123,6 +8129,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             lastNameField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
             lastNameField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated));
             inviteField.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            inviteField.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText));
             inviteField.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated));
             inviteOutlineView.updateColor();
             wrongNumber.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
@@ -8136,6 +8143,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         private void buildEditTextLayout(boolean small) {
             boolean firstHasFocus = firstNameField.hasFocus(), lastHasFocus = lastNameField.hasFocus();
             editTextContainer.removeAllViews();
+            if (inviteOutlineView != null) {
+                int sideMargin = small ? 8 : 16;
+                inviteOutlineView.setLayoutParams(LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, sideMargin, 16, sideMargin, 0));
+            }
 
             if (small) {
                 LinearLayout linearLayout = new LinearLayout(getParentActivity());
@@ -8270,6 +8281,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onShow() {
             super.onShow();
+            refreshInvitePolicy();
             if (privacyView != null) {
                 if (restoringState) {
                     privacyView.setAlpha(1f);
@@ -8303,6 +8315,34 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             requestPhone = params.getString("phoneFormated");
             phoneHash = params.getString("phoneHash");
             currentParams = params;
+        }
+
+        private void refreshInvitePolicy() {
+            ConnectionsManager manager = ConnectionsManager.getInstance(currentAccount);
+            if (invitePolicyRequestId != 0) {
+                manager.cancelRequest(invitePolicyRequestId, true);
+            }
+            TLRPC.TL_help_getAppConfig request = new TLRPC.TL_help_getAppConfig();
+            request.hash = 0;
+            invitePolicyRequestId = manager.sendRequest(request, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+                invitePolicyRequestId = 0;
+                if (!(response instanceof TLRPC.TL_help_appConfig)) {
+                    return;
+                }
+                TLRPC.JSONValue config = ((TLRPC.TL_help_appConfig) response).config;
+                if (!(config instanceof TLRPC.TL_jsonObject)) {
+                    return;
+                }
+                boolean required = false;
+                for (TLRPC.TL_jsonObjectValue item : ((TLRPC.TL_jsonObject) config).value) {
+                    if ("safelink_registration_invite_required".equals(item.key) && item.value instanceof TLRPC.TL_jsonBool) {
+                        required = ((TLRPC.TL_jsonBool) item.value).value;
+                        break;
+                    }
+                }
+                inviteField.setHint(getString(required ? R.string.SafeLinkRegistrationInviteMandatoryHint : R.string.SafeLinkRegistrationInviteOptionalHint));
+            }), ConnectionsManager.RequestFlagWithoutLogin | ConnectionsManager.RequestFlagFailOnServerErrors);
+            manager.bindRequestToGuid(invitePolicyRequestId, classGuid);
         }
 
         @Override
@@ -8352,6 +8392,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         setPage(VIEW_PHONE_INPUT, true, null, true);
                         needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), getString("CodeExpired", R.string.CodeExpired));
                     } else if (error.text.contains("INVITE_CODE_REQUIRED") || error.text.contains("INVITE_CODE_INVALID")) {
+                        refreshInvitePolicy();
                         onFieldError(inviteOutlineView, true);
                         inviteField.requestFocus();
                         needShowAlert(getString(R.string.SafeLinkRegistrationInvite), getString(error.text.contains("INVITE_CODE_REQUIRED") ? R.string.SafeLinkRegistrationInviteRequired : R.string.SafeLinkRegistrationInviteInvalid));

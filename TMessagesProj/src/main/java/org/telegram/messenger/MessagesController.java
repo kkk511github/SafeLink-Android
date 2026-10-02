@@ -2622,6 +2622,7 @@ public class MessagesController extends BaseController implements NotificationCe
 
     private void applyAppConfig(TLRPC.TL_jsonObject object) {
         SharedPreferences.Editor editor = mainPreferences.edit();
+        boolean registrationPasswordRequired = false;
         boolean changed = false;
         boolean storiesChanged = false;
         boolean keelAliveChanged = false;
@@ -2635,6 +2636,12 @@ public class MessagesController extends BaseController implements NotificationCe
         for (int a = 0, N = object.value.size(); a < N; a++) {
             TLRPC.TL_jsonObjectValue value = object.value.get(a);
             switch (value.key) {
+                case "safelink_registration_password_required": {
+                    if (value.value instanceof TLRPC.TL_jsonBool) {
+                        registrationPasswordRequired = ((TLRPC.TL_jsonBool) value.value).value;
+                    }
+                    break;
+                }
                 case "boosts_per_sent_gift": {
                     if (value.value instanceof TLRPC.TL_jsonNumber) {
                         long val = (long) ((TLRPC.TL_jsonNumber) value.value).value;
@@ -4986,6 +4993,10 @@ public class MessagesController extends BaseController implements NotificationCe
             }
         }
 
+        if (registrationPasswordRequired != mainPreferences.getBoolean("safelink_registration_password_required", false)) {
+            editor.putBoolean("safelink_registration_password_required", registrationPasswordRequired);
+            changed = true;
+        }
         if (transcribeAudioTrialWeeklyNumber != this.transcribeAudioTrialWeeklyNumber) {
             this.transcribeAudioTrialWeeklyNumber = transcribeAudioTrialWeeklyNumber;
             editor.putInt("transcribeAudioTrialWeeklyNumber", transcribeAudioTrialWeeklyNumber);

@@ -198,7 +198,7 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
         currentAccount = account;
         currentType = type;
         currentPassword = password;
-        waitingForEmail = !TextUtils.isEmpty(currentPassword.email_unconfirmed_pattern);
+        waitingForEmail = currentPassword != null && !TextUtils.isEmpty(currentPassword.email_unconfirmed_pattern);
         if (currentPassword == null && (currentType == TYPE_INTRO || currentType == TYPE_VERIFY)) {
             loadPasswordInfo();
         }
@@ -257,7 +257,7 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
-                    if (otherwiseReloginDays >= 0 && parentLayout.getFragmentStack().size() == 1) {
+                    if (isMandatoryRegistrationIntro() || otherwiseReloginDays >= 0 && parentLayout.getFragmentStack().size() == 1) {
                         showSetForcePasswordAlert();
                     } else {
                         finishFragment();
@@ -945,6 +945,10 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
             case TYPE_INTRO: {
                 titleTextView.setText(LocaleController.getString(R.string.TwoStepVerificationTitle));
                 descriptionText.setText(LocaleController.getString(R.string.SetAdditionalPasswordInfo));
+                if (otherwiseReloginDays == 0) {
+                    titleTextView.setText("设置登录密码");
+                    descriptionText.setText("完成密码设置后即可使用 SafeLink。此设备保留有效登录凭证时，下次登录可直接验证密码。");
+                }
                 buttonTextView.setText(LocaleController.getString(R.string.TwoStepVerificationSetPassword));
                 descriptionText.setVisibility(View.VISIBLE);
 
@@ -953,6 +957,10 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
                 break;
             }
             case TYPE_PASSWORD_SET: {
+                if (otherwiseReloginDays == 0) {
+                    MessagesController.getMainSettings(currentAccount).edit().putBoolean("safelink_registration_password_required", false).apply();
+                    getMessagesController().loadAppConfig(true);
+                }
                 titleTextView.setText(LocaleController.getString(R.string.TwoStepVerificationPasswordSet));
                 descriptionText.setText(LocaleController.getString(R.string.TwoStepVerificationPasswordSetInfo));
                 if (closeAfterSet) {
@@ -2105,6 +2113,7 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
 
     @Override
     public boolean isSwipeBackEnabled(MotionEvent event) {
+        if (isMandatoryRegistrationIntro()) return false;
         if (otherwiseReloginDays >= 0 && parentLayout.getFragmentStack().size() == 1) {
             return false;
         }
@@ -2113,6 +2122,10 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
 
     @Override
     public boolean onBackPressed(boolean invoked) {
+        if (isMandatoryRegistrationIntro()) {
+            if (invoked) showSetForcePasswordAlert();
+            return false;
+        }
         if (otherwiseReloginDays >= 0 && parentLayout.getFragmentStack().size() == 1) {
             if (invoked) showSetForcePasswordAlert();
             return false;
@@ -2133,6 +2146,17 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
     }
 
     private void showSetForcePasswordAlert() {
+        if (otherwiseReloginDays == 0) {
+            if (!MessagesController.getMainSettings(currentAccount).getBoolean("safelink_registration_password_required", false)) {
+                finishFragment();
+                return;
+            }
+            new AlertDialog.Builder(getParentActivity()).setTitle("请先设置密码")
+                    .setMessage("此服务器要求新用户完成两步验证密码设置。")
+                    .setPositiveButton("继续设置", null)
+                    .setNegativeButton("退出当前账号", (dialog, which) -> getMessagesController().performLogout(1)).show();
+            return;
+        }
         AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
         builder.setTitle(LocaleController.getString(R.string.Warning));
         builder.setMessage(LocaleController.formatPluralString("ForceSetPasswordAlertMessageShort", otherwiseReloginDays));
@@ -2145,6 +2169,11 @@ public class TwoStepVerificationSetupActivity extends BaseFragment {
 
     public void setBlockingAlert(int otherwiseRelogin) {
         otherwiseReloginDays = otherwiseRelogin;
+    }
+
+    private boolean isMandatoryRegistrationIntro() {
+        return otherwiseReloginDays == 0 && currentType == TYPE_INTRO
+                && MessagesController.getMainSettings(currentAccount).getBoolean("safelink_registration_password_required", false);
     }
 
     @Override
