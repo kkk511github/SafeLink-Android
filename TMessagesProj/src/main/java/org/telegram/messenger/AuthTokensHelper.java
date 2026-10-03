@@ -126,7 +126,11 @@ public class AuthTokensHelper {
         }
         SerializedData data = new SerializedData(response.getObjectSize());
         response.serializeToStream(data);
-        editor.putString("log_out_token_0", Utilities.bytesToHex(data.toByteArray())).putInt("count", count + 1).apply();
+        // The logout flow returns to the login screen immediately. Persist this
+        // token before that screen can issue the next auth.sendCode request.
+        if (!editor.putString("log_out_token_0", Utilities.bytesToHex(data.toByteArray())).putInt("count", count + 1).commit()) {
+            FileLog.e("Failed to persist future auth token");
+        }
         BackupAgent.requestBackup(ApplicationLoader.applicationContext);
     }
 

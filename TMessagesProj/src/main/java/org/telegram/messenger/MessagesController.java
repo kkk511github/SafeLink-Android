@@ -15571,58 +15571,64 @@ public class MessagesController extends BaseController implements NotificationCe
     }
 
     public void performLogout(int type) {
-        final String logoutServerId = SafeLinkServers.account(currentAccount).id;
+        final int logoutAccount = currentAccount;
+        final String logoutServerId = SafeLinkServers.account(logoutAccount).id;
+        final Runnable completeLogout = () -> {
+            getUserConfig().clearConfig();
+            SharedPrefsHelper.cleanupAccount(logoutAccount);
+
+            boolean shouldHandle = true;
+            ArrayList<NotificationCenter.NotificationCenterDelegate> observers = getNotificationCenter().getObservers(NotificationCenter.appDidLogout);
+            if (observers != null) {
+                for (int a = 0, N = observers.size(); a < N; a++) {
+                    if (observers.get(a) instanceof LaunchActivity) {
+                        shouldHandle = false;
+                        break;
+                    }
+                }
+            }
+            if (shouldHandle) {
+                if (UserConfig.selectedAccount == logoutAccount) {
+                    int account = -1;
+                    for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                        if (UserConfig.getInstance(a).isClientActivated()) {
+                            account = a;
+                            break;
+                        }
+                    }
+                    if (account != -1) {
+                        UserConfig.selectedAccount = account;
+                        UserConfig.getInstance(0).saveConfig(false);
+                        if (LaunchActivity.instance != null) {
+                            LaunchActivity.instance.clearFragments();
+                        }
+                    }
+                }
+            }
+            getNotificationCenter().postNotificationName(NotificationCenter.appDidLogout);
+            getMessagesStorage().cleanup(false);
+            cleanup();
+            getContactsController().deleteUnknownAppAccounts();
+        };
+
         if (type == 1) {
             unregistedPush();
             TLRPC.TL_auth_logOut req = new TLRPC.TL_auth_logOut();
             getConnectionsManager().sendRequest(req, (response, error) -> {
+                // Persist the token before clearing the account and exposing the
+                // login screen. Otherwise the next auth.sendCode can race the
+                // logout response and fall back to SMS/email verification.
+                if (response instanceof TLRPC.TL_auth_loggedOut) {
+                    AuthTokensHelper.addLogOutToken(logoutServerId, (TLRPC.TL_auth_loggedOut) response);
+                }
                 getConnectionsManager().cleanup(false);
-                AndroidUtilities.runOnUIThread(() -> {
-                    if (response instanceof TLRPC.TL_auth_loggedOut) {
-                        if (((TLRPC.TL_auth_loggedOut) response).future_auth_token != null) {
-                            AuthTokensHelper.addLogOutToken(logoutServerId, (TLRPC.TL_auth_loggedOut) response);
-                        }
-                    }
-                });
+                AndroidUtilities.runOnUIThread(completeLogout);
             });
-        } else {
-            getConnectionsManager().cleanup(type == 2);
+            return;
         }
-        getUserConfig().clearConfig();
-        SharedPrefsHelper.cleanupAccount(currentAccount);
 
-        boolean shouldHandle = true;
-        ArrayList<NotificationCenter.NotificationCenterDelegate> observers = getNotificationCenter().getObservers(NotificationCenter.appDidLogout);
-        if (observers != null) {
-            for (int a = 0, N = observers.size(); a < N; a++) {
-                if (observers.get(a) instanceof LaunchActivity) {
-                    shouldHandle = false;
-                    break;
-                }
-            }
-        }
-        if (shouldHandle) {
-            if (UserConfig.selectedAccount == currentAccount) {
-                int account = -1;
-                for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-                    if (UserConfig.getInstance(a).isClientActivated()) {
-                        account = a;
-                        break;
-                    }
-                }
-                if (account != -1) {
-                    UserConfig.selectedAccount = account;
-                    UserConfig.getInstance(0).saveConfig(false);
-                    if (LaunchActivity.instance != null) {
-                        LaunchActivity.instance.clearFragments();
-                    }
-                }
-            }
-        }
-        getNotificationCenter().postNotificationName(NotificationCenter.appDidLogout);
-        getMessagesStorage().cleanup(false);
-        cleanup();
-        getContactsController().deleteUnknownAppAccounts();
+        getConnectionsManager().cleanup(type == 2);
+        completeLogout.run();
     }
 
     public void registerForPush(@PushListenerController.PushType int pushType, String regid) {
