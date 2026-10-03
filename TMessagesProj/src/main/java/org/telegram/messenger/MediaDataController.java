@@ -54,6 +54,7 @@ import org.telegram.SQLite.SQLiteException;
 import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.messenger.ringtone.RingtoneDataStore;
 import org.telegram.messenger.ringtone.RingtoneUploader;
+import org.telegram.messenger.utils.EphemeralMessagesHelper;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.RequestDelegate;
@@ -64,6 +65,8 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.Vector;
 import org.telegram.tgnet.tl.TL_account;
 import org.telegram.tgnet.tl.TL_bots;
+import org.telegram.tgnet.tl.TL_ephemeral;
+import org.telegram.tgnet.tl.TL_iv;
 import org.telegram.tgnet.tl.TL_update;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.EmojiThemes;
@@ -91,6 +94,7 @@ import org.telegram.ui.Stories.StoriesStorage;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -6532,7 +6536,7 @@ public class MediaDataController extends BaseController {
                     for (int b = 0, N2 = replyMessageOwners.size(); b < N2; b++) {
                         long did = replyMessageOwners.keyAt(b);
                         SparseArray<ArrayList<MessageObject>> owners = replyMessageOwners.valueAt(b);
-                        ArrayList<Integer> ids = dialogReplyMessagesIds.get(did);
+                        ArrayList<Integer> ids = dialogReplyMessagesIds.get(-did);
                         if (ids == null) {
                             continue;
                         }
@@ -6570,6 +6574,23 @@ public class MediaDataController extends BaseController {
                                 }
                             }
                             cursor.dispose();
+                        }
+
+                        ArrayList<Integer> ephemeralIds = new ArrayList<>();
+                        for (int msgId: ids) {
+                            if (MessageObject.isEphemeralMessageId(msgId)) {
+                                ephemeralIds.add(MessageObject.ephemeralMessageIdUnpack(msgId));
+                            }
+                        }
+                        if (!ephemeralIds.isEmpty()) {
+                            ArrayList<TL_ephemeral.EphemeralMessage> ephemeralMessages = getMessagesStorage().getEphemeralMessagesInternal(dialogId, ephemeralIds);
+                            if (ephemeralMessages != null) {
+                                for (TL_ephemeral.EphemeralMessage ephemeralMessage : ephemeralMessages) {
+                                    TLRPC.Message convetedEphemeralMessage = EphemeralMessagesHelper.convertEphemeralToFakeDefault(ephemeralMessage);
+                                    MessagesStorage.addUsersAndChatsFromMessage(convetedEphemeralMessage, usersToLoad, chatsToLoad, null);
+                                    result.add(convetedEphemeralMessage);
+                                }
+                            }
                         }
                     }
 
@@ -6999,6 +7020,10 @@ public class MediaDataController extends BaseController {
     }
 
     public static final int MAX_STYLE_RUNS_COUNT = 1000;
+    private static final int MAX_STYLE_ENTITIES_COUNT = 1000;
+    private static final int MAX_LEGACY_STYLE_ENTITIES_COUNT = 100;
+    private static final int MAX_LEGACY_STYLE_RUNS_COUNT = 100;
+    private static final int MAX_LEGACY_STYLE_PROCESSING_STEPS = 10_000;
     public static final int MAX_LINKS_COUNT = 250;
 
     public static void addAnimatedEmojiSpans(ArrayList<TLRPC.MessageEntity> entities, CharSequence messageText, Paint.FontMetricsInt fontMetricsInt) {
@@ -7034,8 +7059,26 @@ public class MediaDataController extends BaseController {
     }
 
     public static ArrayList<TextStyleSpan.TextStyleRun> getTextStyleRuns(ArrayList<TLRPC.MessageEntity> entities, CharSequence text, int allowedFlags) {
+        if (entities != null && entities.size() > MAX_LEGACY_STYLE_ENTITIES_COUNT) {
+            return getTextStyleRunsSafe(entities, text, allowedFlags);
+        }
+        ArrayList<TextStyleSpan.TextStyleRun> runs = getTextStyleRunsLegacy(entities, text, allowedFlags);
+        return runs != null ? runs : getTextStyleRunsSafe(entities, text, allowedFlags);
+    }
+
+    private static ArrayList<TextStyleSpan.TextStyleRun> getTextStyleRunsSafe(ArrayList<TLRPC.MessageEntity> entities, CharSequence text, int allowedFlags) {
         ArrayList<TextStyleSpan.TextStyleRun> runs = new ArrayList<>();
-        ArrayList<TLRPC.MessageEntity> entitiesCopy = new ArrayList<>(entities);
+        if (entities == null || entities.isEmpty() || text == null || text.length() == 0 || entities.size() > MAX_STYLE_ENTITIES_COUNT) {
+            return runs;
+        }
+
+        ArrayList<TLRPC.MessageEntity> entitiesCopy = new ArrayList<>(entities.size());
+        for (int i = 0, size = entities.size(); i < size; i++) {
+            TLRPC.MessageEntity entity = entities.get(i);
+            if (entity != null) {
+                entitiesCopy.add(entity);
+            }
+        }
 
         Collections.sort(entitiesCopy, (o1, o2) -> {
             if (o1.offset > o2.offset) {
@@ -7045,21 +7088,143 @@ public class MediaDataController extends BaseController {
             }
             return 0;
         });
+        ArrayList<TextStyleSpan.TextStyleRun> entityRuns = new ArrayList<>(entitiesCopy.size());
+        int[] boundaries = new int[entitiesCopy.size() * 2];
+        int boundariesCount = 0;
         for (int a = 0, N = entitiesCopy.size(); a < N; a++) {
             TLRPC.MessageEntity entity = entitiesCopy.get(a);
-            if (entity == null || entity.length <= 0 || entity.offset < 0 || entity.offset >= text.length()) {
+            if (entity.length <= 0 || entity.offset < 0 || entity.offset >= text.length()) {
                 continue;
-            } else if (entity.offset + entity.length > text.length()) {
-                entity.length = text.length() - entity.offset;
             }
+
+            // Clamp without adding offset + length, which could overflow, and without
+            // modifying the entity received from the network or owned by the caller.
+            final int entityStart = entity.offset;
+            final int entityEnd = entityStart + Math.min(entity.length, text.length() - entityStart);
 
             if (entity instanceof TLRPC.TL_messageEntityCustomEmoji) {
                 continue;
             }
 
             TextStyleSpan.TextStyleRun newRun = new TextStyleSpan.TextStyleRun();
+            newRun.start = entityStart;
+            newRun.end = entityEnd;
+            if (entity instanceof TLRPC.TL_messageEntitySpoiler) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_SPOILER;
+            } else if (entity instanceof TLRPC.TL_messageEntityStrike) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_STRIKE;
+            } else if (entity instanceof TLRPC.TL_messageEntityUnderline) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_UNDERLINE;
+            } else if (entity instanceof TLRPC.TL_messageEntityBold) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_BOLD;
+            } else if (entity instanceof TLRPC.TL_messageEntityItalic) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_ITALIC;
+            } else if (entity instanceof TLRPC.TL_messageEntityCode || entity instanceof TLRPC.TL_messageEntityPre) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_MONO;
+            } else if (entity instanceof TLRPC.TL_messageEntityMentionName) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_MENTION;
+                newRun.urlEntity = entity;
+            } else if (entity instanceof TLRPC.TL_inputMessageEntityMentionName) {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_MENTION;
+                newRun.urlEntity = entity;
+            } else {
+                newRun.flags = TextStyleSpan.FLAG_STYLE_URL;
+                newRun.urlEntity = entity;
+            }
+            if (entity instanceof TLRPC.TL_messageEntityTextUrl) {
+                newRun.flags |= TextStyleSpan.FLAG_STYLE_TEXT_URL;
+            }
+
+            newRun.flags &= allowedFlags;
+            entityRuns.add(newRun);
+            boundaries[boundariesCount++] = entityStart;
+            boundaries[boundariesCount++] = entityEnd;
+        }
+
+        if (boundariesCount == 0) {
+            return runs;
+        }
+
+        Arrays.sort(boundaries, 0, boundariesCount);
+        for (int boundaryIndex = 0; boundaryIndex < boundariesCount;) {
+            final int segmentStart = boundaries[boundaryIndex];
+            while (boundaryIndex < boundariesCount && boundaries[boundaryIndex] == segmentStart) {
+                boundaryIndex++;
+            }
+            if (boundaryIndex >= boundariesCount) {
+                break;
+            }
+            final int segmentEnd = boundaries[boundaryIndex];
+
+            TextStyleSpan.TextStyleRun segment = null;
+            int selectedUrlStart = Integer.MIN_VALUE;
+            for (int i = 0, size = entityRuns.size(); i < size; i++) {
+                TextStyleSpan.TextStyleRun entityRun = entityRuns.get(i);
+                if (entityRun.start > segmentStart || entityRun.end < segmentEnd) {
+                    continue;
+                }
+                if (segment == null) {
+                    segment = new TextStyleSpan.TextStyleRun();
+                    segment.start = segmentStart;
+                    segment.end = segmentEnd;
+                }
+                segment.flags |= entityRun.flags;
+
+                // The old splitting algorithm gives URL ownership to the
+                // innermost entity.  For equal starts, stable entity order wins.
+                if (entityRun.urlEntity != null &&
+                        (segment.urlEntity == null || entityRun.start > selectedUrlStart)) {
+                    segment.urlEntity = entityRun.urlEntity;
+                    selectedUrlStart = entityRun.start;
+                }
+            }
+
+            if (segment == null) {
+                continue;
+            }
+            if (!runs.isEmpty()) {
+                TextStyleSpan.TextStyleRun previous = runs.get(runs.size() - 1);
+                if (previous.end == segment.start && previous.flags == segment.flags &&
+                        previous.urlEntity == segment.urlEntity) {
+                    previous.end = segment.end;
+                    continue;
+                }
+            }
+            if (runs.size() >= MAX_STYLE_RUNS_COUNT) {
+                runs.clear();
+                return runs;
+            }
+            runs.add(segment);
+        }
+        return runs;
+    }
+
+    private static ArrayList<TextStyleSpan.TextStyleRun> getTextStyleRunsLegacy(ArrayList<TLRPC.MessageEntity> entities, CharSequence text, int allowedFlags) {
+        if (entities == null || entities.isEmpty() || text == null || text.length() == 0 || entities.size() > MAX_STYLE_ENTITIES_COUNT) {
+            return new ArrayList<>();
+        }
+
+        ArrayList<TLRPC.MessageEntity> entitiesCopy = new ArrayList<>(entities.size());
+        for (int i = 0, size = entities.size(); i < size; i++) {
+            TLRPC.MessageEntity entity = entities.get(i);
+            if (entity != null) {
+                entitiesCopy.add(entity);
+            }
+        }
+        Collections.sort(entitiesCopy, (o1, o2) -> Integer.compare(o1.offset, o2.offset));
+
+        ArrayList<TextStyleSpan.TextStyleRun> runs = new ArrayList<>();
+        int processingSteps = 0;
+        for (int a = 0, count = entitiesCopy.size(); a < count; a++) {
+            TLRPC.MessageEntity entity = entitiesCopy.get(a);
+            if (entity.length <= 0 || entity.offset < 0 || entity.offset >= text.length() ||
+                    entity instanceof TLRPC.TL_messageEntityCustomEmoji) {
+                continue;
+            }
+
+            TextStyleSpan.TextStyleRun newRun = new TextStyleSpan.TextStyleRun();
             newRun.start = entity.offset;
-            newRun.end = newRun.start + entity.length;
+            newRun.end = newRun.start + Math.min(entity.length, text.length() - newRun.start);
             TLRPC.MessageEntity urlEntity = null;
             if (entity instanceof TLRPC.TL_messageEntitySpoiler) {
                 newRun.flags = TextStyleSpan.FLAG_STYLE_SPOILER;
@@ -7089,7 +7254,10 @@ public class MediaDataController extends BaseController {
 
             newRun.flags &= allowedFlags;
 
-            for (int b = 0, N2 = runs.size(); b < N2; b++) {
+            for (int b = 0, runsCount = runs.size(); b < runsCount; b++) {
+                if (++processingSteps > MAX_LEGACY_STYLE_PROCESSING_STEPS) {
+                    return null;
+                }
                 TextStyleSpan.TextStyleRun run = runs.get(b);
 
                 if (newRun.start > run.start) {
@@ -7098,24 +7266,27 @@ public class MediaDataController extends BaseController {
                     }
 
                     if (newRun.end < run.end) {
+                        if (runs.size() > MAX_LEGACY_STYLE_RUNS_COUNT - 2) {
+                            return null;
+                        }
                         TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun(newRun);
                         r.merge(run);
-                        b++;
-                        N2++;
-                        runs.add(b, r);
+                        runs.add(++b, r);
+                        runsCount++;
 
                         r = new TextStyleSpan.TextStyleRun(run);
                         r.start = newRun.end;
-                        b++;
-                        N2++;
-                        runs.add(b, r);
+                        runs.add(++b, r);
+                        runsCount++;
                     } else {
+                        if (runs.size() >= MAX_LEGACY_STYLE_RUNS_COUNT) {
+                            return null;
+                        }
                         TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun(newRun);
                         r.merge(run);
                         r.end = run.end;
-                        b++;
-                        N2++;
-                        runs.add(b, r);
+                        runs.add(++b, r);
+                        runsCount++;
                     }
 
                     int temp = newRun.start;
@@ -7129,28 +7300,40 @@ public class MediaDataController extends BaseController {
                     if (newRun.end == run.end) {
                         run.merge(newRun);
                     } else if (newRun.end < run.end) {
+                        if (runs.size() >= MAX_LEGACY_STYLE_RUNS_COUNT) {
+                            return null;
+                        }
                         TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun(run);
                         r.merge(newRun);
                         r.end = newRun.end;
-                        b++;
-                        N2++;
-                        runs.add(b, r);
-
+                        runs.add(++b, r);
+                        runsCount++;
                         run.start = newRun.end;
                     } else {
+                        if (runs.size() >= MAX_LEGACY_STYLE_RUNS_COUNT) {
+                            return null;
+                        }
                         TextStyleSpan.TextStyleRun r = new TextStyleSpan.TextStyleRun(newRun);
                         r.start = run.end;
-                        b++;
-                        N2++;
-                        runs.add(b, r);
-
+                        runs.add(++b, r);
+                        runsCount++;
                         run.merge(newRun);
                     }
                     newRun.end = temp;
                 }
             }
             if (newRun.start < newRun.end) {
+                if (runs.size() >= MAX_LEGACY_STYLE_RUNS_COUNT) {
+                    return null;
+                }
                 runs.add(newRun);
+            }
+        }
+
+        for (int i = 0, size = runs.size(); i < size; i++) {
+            TextStyleSpan.TextStyleRun run = runs.get(i);
+            if (run.start < 0 || run.start >= run.end || run.end > text.length()) {
+                return null;
             }
         }
         return runs;
@@ -7178,6 +7361,10 @@ public class MediaDataController extends BaseController {
     }
 
     public ArrayList<TLRPC.MessageEntity> getEntities(CharSequence[] message, boolean allowStrike) {
+        return getEntities(message, allowStrike, true);
+    }
+
+    public ArrayList<TLRPC.MessageEntity> getEntities(CharSequence[] message, boolean allowStrike, boolean parseMarkdown) {
         if (message == null || message[0] == null) {
             return null;
         }
@@ -7188,7 +7375,7 @@ public class MediaDataController extends BaseController {
         boolean isPre = false;
         final String mono = "`";
         final String pre = "```";
-        while ((index = TextUtils.indexOf(message[0], !isPre ? mono : pre, lastIndex)) != -1) {
+        while (parseMarkdown && (index = TextUtils.indexOf(message[0], !isPre ? mono : pre, lastIndex)) != -1) {
             if (start == -1) {
                 isPre = message[0].length() - index > 2 && message[0].charAt(index + 1) == '`' && message[0].charAt(index + 2) == '`';
                 start = index;
@@ -7464,11 +7651,13 @@ public class MediaDataController extends BaseController {
 
         CharSequence cs = message[0];
         if (entities == null) entities = new ArrayList<>();
-        cs = parsePattern(cs, BOLD_PATTERN, entities, obj -> new TLRPC.TL_messageEntityBold());
-        cs = parsePattern(cs, ITALIC_PATTERN, entities, obj -> new TLRPC.TL_messageEntityItalic());
-        cs = parsePattern(cs, SPOILER_PATTERN, entities, obj -> new TLRPC.TL_messageEntitySpoiler());
-        if (allowStrike) {
-            cs = parsePattern(cs, STRIKE_PATTERN, entities, obj -> new TLRPC.TL_messageEntityStrike());
+        if (parseMarkdown) {
+            cs = parsePattern(cs, BOLD_PATTERN, entities, obj -> new TLRPC.TL_messageEntityBold());
+            cs = parsePattern(cs, ITALIC_PATTERN, entities, obj -> new TLRPC.TL_messageEntityItalic());
+            cs = parsePattern(cs, SPOILER_PATTERN, entities, obj -> new TLRPC.TL_messageEntitySpoiler());
+            if (allowStrike) {
+                cs = parsePattern(cs, STRIKE_PATTERN, entities, obj -> new TLRPC.TL_messageEntityStrike());
+            }
         }
 
         // trim again in case some whitespace inside tags
@@ -7679,15 +7868,20 @@ public class MediaDataController extends BaseController {
     }
 
     public void saveDraft(long dialogId, long threadId, CharSequence message, ArrayList<TLRPC.MessageEntity> entities, TLRPC.Message replyToMessage, ChatActivity.ReplyQuote quote, TLRPC.SuggestedPost suggestedPost, long effectId, boolean noWebpage, boolean clean) {
+        saveDraft(dialogId, threadId, message, entities, replyToMessage, quote, suggestedPost, effectId, noWebpage, clean, null);
+    }
+
+    public void saveDraft(long dialogId, long threadId, CharSequence message, ArrayList<TLRPC.MessageEntity> entities, TLRPC.Message replyToMessage, ChatActivity.ReplyQuote quote, TLRPC.SuggestedPost suggestedPost, long effectId, boolean noWebpage, boolean clean, TL_iv.RichMessage richMessage) {
         TLRPC.DraftMessage draftMessage;
         if (getMessagesController().isForum(dialogId) && threadId == 0) {
             replyToMessage = null;
         }
-        if (!TextUtils.isEmpty(message) || replyToMessage != null) {
+        if (!TextUtils.isEmpty(message) || replyToMessage != null || richMessage != null) {
             draftMessage = new TLRPC.TL_draftMessage();
         } else {
             draftMessage = new TLRPC.TL_draftMessageEmpty();
         }
+        draftMessage.rich_message = richMessage;
         draftMessage.date = (int) (System.currentTimeMillis() / 1000);
         draftMessage.message = message == null ? "" : message.toString();
         draftMessage.no_webpage = noWebpage;
@@ -7752,12 +7946,14 @@ public class MediaDataController extends BaseController {
                 sameDraft = (currentDraft.message.equals(draftMessage.message)
                     && replyToEquals(currentDraft.reply_to, draftMessage.reply_to)
                     && suggestedPostEquals(currentDraft.suggested_post, draftMessage.suggested_post)
+                    && richMessageEquals(currentDraft.rich_message, draftMessage.rich_message)
                     && currentDraft.no_webpage == draftMessage.no_webpage
                     && currentDraft.effect == draftMessage.effect);
             } else {
                 sameDraft = (TextUtils.isEmpty(draftMessage.message)
                     && (draftMessage.reply_to == null || draftMessage.reply_to.reply_to_msg_id == 0)
                     && draftMessage.effect == 0
+                    && draftMessage.rich_message == null
                     && draftMessage.suggested_post == null);
             }
             if (sameDraft) {
@@ -7779,6 +7975,9 @@ public class MediaDataController extends BaseController {
                 req.reply_to = draftMessage.reply_to;
                 req.suggested_post = draftMessage.suggested_post;
                 req.entities = draftMessage.entities;
+                if (draftMessage.rich_message != null) {
+                    req.rich_message = toInputRichMessage(draftMessage.rich_message);
+                }
 
                 if ((draftMessage.flags & 128) != 0) {
                     req.effect = draftMessage.effect;
@@ -7808,6 +8007,57 @@ public class MediaDataController extends BaseController {
         }
 
         return true;
+    }
+
+    private static boolean richMessageEquals(TL_iv.RichMessage a, TL_iv.RichMessage b) {
+        if (a == b) {
+            return true;
+        }
+        if ((a == null) != (b == null)) {
+            return false;
+        }
+        try {
+            SerializedData bufA = new SerializedData(a.getObjectSize());
+            SerializedData bufB = new SerializedData(b.getObjectSize());
+            a.serializeToStream(bufA);
+            b.serializeToStream(bufB);
+            return Arrays.equals(bufA.toByteArray(), bufB.toByteArray());
+        } catch (Exception e) {
+            FileLog.e(e);
+            return false;
+        }
+    }
+
+    private TL_iv.TL_inputRichMessage toInputRichMessage(TL_iv.RichMessage rich) {
+        TL_iv.TL_inputRichMessage input = new TL_iv.TL_inputRichMessage();
+        input.rtl = rich.rtl;
+        input.blocks = new ArrayList<>(rich.blocks.size());
+        for (int i = 0; i < rich.blocks.size(); i++) {
+            input.blocks.add(SendMessagesHelper.toInputPageBlock(rich.blocks.get(i)));
+        }
+        if (rich.photos != null && !rich.photos.isEmpty()) {
+            for (int i = 0; i < rich.photos.size(); i++) {
+                TLRPC.Photo p = rich.photos.get(i);
+                TLRPC.TL_inputPhoto ip = new TLRPC.TL_inputPhoto();
+                ip.id = p.id;
+                ip.access_hash = p.access_hash;
+                ip.file_reference = p.file_reference != null ? p.file_reference : new byte[0];
+                input.photos.add(ip);
+            }
+            input.flags |= 4;
+        }
+        if (rich.documents != null && !rich.documents.isEmpty()) {
+            for (int i = 0; i < rich.documents.size(); i++) {
+                TLRPC.Document d = rich.documents.get(i);
+                TLRPC.TL_inputDocument id = new TLRPC.TL_inputDocument();
+                id.id = d.id;
+                id.access_hash = d.access_hash;
+                id.file_reference = d.file_reference != null ? d.file_reference : new byte[0];
+                input.documents.add(id);
+            }
+            input.flags |= 8;
+        }
+        return input;
     }
 
     private static boolean replyToEquals(TLRPC.InputReplyTo a, TLRPC.InputReplyTo b) {
@@ -8301,7 +8551,7 @@ public class MediaDataController extends BaseController {
                 mid = cursor.intValue(0);
             }
             cursor.dispose();
-            if (mid >= message.id) {
+            if (mid >= message.id && !MessageObject.isEphemeralMessageId(mid) && !MessageObject.isEphemeralMessageId(message.id)) {
                 return;
             }
 

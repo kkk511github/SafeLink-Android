@@ -3,7 +3,7 @@ package org.telegram.messenger;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.google.android.exoplayer2.util.Log;
+
 
 import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLRPC;
@@ -110,7 +110,7 @@ public class AuthTokensHelper {
                 editor.putString("log_in_token_" + i, Utilities.bytesToHex(data.toByteArray()));
             }
             editor.apply();
-            BackupAgent.requestBackup(ApplicationLoader.applicationContext);
+            BackupAgent.requestBackup();
         }
     }
 
@@ -131,7 +131,7 @@ public class AuthTokensHelper {
         if (!editor.putString("log_out_token_0", Utilities.bytesToHex(data.toByteArray())).putInt("count", count + 1).commit()) {
             FileLog.e("Failed to persist future auth token");
         }
-        BackupAgent.requestBackup(ApplicationLoader.applicationContext);
+        BackupAgent.requestBackup();
     }
 
     public static void clearLogInTokens() {

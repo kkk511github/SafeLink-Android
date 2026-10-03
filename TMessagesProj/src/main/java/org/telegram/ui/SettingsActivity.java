@@ -56,11 +56,10 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.collection.LongSparseArray;
+import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.RecyclerView;
-
-import com.google.common.collect.Lists;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AndroidUtilities;
@@ -83,6 +82,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.SharedPrefsHelper;
+import org.telegram.utils.settings.SharedSettings;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.browser.Browser;
@@ -141,9 +141,7 @@ import org.telegram.ui.bots.SetupEmojiStatusSheet;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -335,6 +333,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         searchItem.setSearchFieldHint(getString(R.string.Search));
 
         otherItem = menu.addItem(1, R.drawable.ic_ab_other);
+        otherItem.setContentDescription(getString(R.string.AccDescrMoreOptions));
         otherItem.addSubItem(2, R.drawable.msg_leave, getString(R.string.LogOut));
 
         search = new ProfileActivity.SearchAdapter(this, context) {
@@ -711,7 +710,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         if (ApplicationLoader.isBetaBuild() || ApplicationLoader.isStandaloneBuild() || ApplicationLoader.isHuaweiStoreBuild() || (StarsController.getInstance(currentAccount, true).balanceAvailable() && (StarsController.getInstance(currentAccount, true).hasTransactions() || StarsController.getInstance(currentAccount, true).getBalance().positive()))) {
             StarsController c = StarsController.getTonInstance(currentAccount);
             long balance = c.getBalance().amount;
-            items.add(SettingCell.Factory.of(13, 0xFF1BA4ED, 0xFF1488E1, R.drawable.settings_ton, getString(R.string.MyTON), null, c.balanceAvailable() && balance > 0 ? StarsIntroActivity.formatStarsAmount(c.getBalance(), 0.85f, ' ') : ""));
+            items.add(SettingCell.Factory.of(13, 0xFF1BA4ED, 0xFF1488E1, R.drawable.settings_gram_24, getString(R.string.MyTON), null, c.balanceAvailable() && balance > 0 ? StarsIntroActivity.formatStarsAmount(c.getBalance(), 0.85f, ' ') : ""));
         }
 
         TLRPC.TL_attachMenuBots menuBots = MediaDataController.getInstance(UserConfig.selectedAccount).getAttachMenuBots();
@@ -740,6 +739,12 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         items.add(SettingCell.Factory.of(18, IconBackgroundColors.BLUE_LIGHT.top, IconBackgroundColors.BLUE_LIGHT.bottom, R.drawable.settings_faq, getString(R.string.TelegramFAQ)));
         items.add(SettingCell.Factory.of(23, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_features, getString(R.string.TelegramFeatures)));
         items.add(SettingCell.Factory.of(19, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_policy, getString(R.string.PrivacyPolicy)));
+
+        if (SharedSettings.experimentalSettingsAllowed.get()) {
+            items.add(UItem.asShadow(null));
+            items.add(UItem.asHeader("Experimental"));
+            items.add(SettingCell.Factory.of(24, 0xFFF45255, 0xFFDF3955, 0, getString(R.string.RoundVideoSettings)));
+        }
 
         if (BuildVars.LOGS_ENABLED || BuildVars.DEBUG_PRIVATE_VERSION) {
             items.add(UItem.asShadow(null));
@@ -883,6 +888,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 }
                 break;
             }
+            case 24: {
+                presentFragment(new RoundVideoSettingsActivity());
+                break;
+            }
         }
     }
 
@@ -957,8 +966,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
     @NonNull
     private WindowInsetsCompat onApplyWindowInsets(@NonNull View v, @NonNull WindowInsetsCompat insets) {
-        final int statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top;
-        navigationBarHeight = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom;
+        final Insets systemInsets = AndroidUtilities.getDefaultWindowInsets(insets, false);
+        navigationBarHeight = systemInsets.bottom;
+        final int statusBarHeight = systemInsets.top;
         listView.setPadding(0, statusBarHeight + dp(12), 0, navigationBarHeight + additionNavigationBarHeight);
         return WindowInsetsCompat.CONSUMED;
     }
@@ -1043,6 +1053,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
             counterView.setBackground(Theme.createRoundRectDrawable(dp(10), Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider)));
             arrowView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon, resourcesProvider), PorterDuff.Mode.SRC_IN));
+            emojiStatusDrawable.setColor(Theme.getColor(Theme.key_profile_verifiedBackground, resourcesProvider));
         }
 
         public void set(int account) {
@@ -1138,11 +1149,17 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         private final TextView titleView;
         private final TextView subtitleView;
         private final TextView valueView;
+        private final boolean mini;
 
         public SettingCell(Context context, Theme.ResourcesProvider resourcesProvider) {
+            this(context, resourcesProvider, false);
+        }
+
+        public SettingCell(Context context, Theme.ResourcesProvider resourcesProvider, boolean mini) {
             super(context);
 
             this.resourcesProvider = resourcesProvider;
+            this.mini = mini;
             setOrientation(HORIZONTAL);
 
             iconLayout = new FrameLayout(context);
@@ -1167,11 +1184,11 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
             if (LocaleController.isRTL) {
                 addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 20, 0, 0, 0));
-                addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 20, 0, 18, 0));
-                addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0, 18, 0));
+                addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 20, 0, mini ? 12 : 18, 0));
+                addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0, mini ? 9 : 18, 0));
             } else {
-                addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, 18, 0, 0, 0));
-                addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 18, 0, 20, 0));
+                addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, mini ? 9 : 18, 0, 0, 0));
+                addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL,  mini ? 12 : 18, 0, 20, 0));
                 addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 20, 0));
             }
             updateColors();
@@ -1202,6 +1219,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             titleView.setText(title);
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);
+            setValue(value);
+        }
+
+        public void setValue(CharSequence value) {
             valueView.setVisibility(!TextUtils.isEmpty(value) ? View.VISIBLE : View.GONE);
             valueView.setText(value);
         }
@@ -1210,7 +1231,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             super.onMeasure(
                 MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(dp(twoLines ? 60 : 50), MeasureSpec.EXACTLY)
+                MeasureSpec.makeMeasureSpec(dp(mini ? 44 : twoLines ? 60 : 50), MeasureSpec.EXACTLY)
             );
         }
 
@@ -1452,6 +1473,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 (SharedConfig.frameMetricsEnabled ? "hide frame metrics" : "show frame metrics"),
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.shadowsInSections ? "disable shadows in settings" : "enable shadows in settings") : null,
                 BuildVars.DEBUG_PRIVATE_VERSION ? (SharedConfig.debugViewMetrics ? "disable debug view metrics" : "enable debug view metrics") : null,
+                (SharedSettings.experimentalSettingsAllowed.get() ? "hide experimental settings" : "show experimental settings")
         };
 
         builder.setItems(items, (dialog, which) -> {
@@ -1761,6 +1783,9 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             } else if (which == 41) {
                 final SharedPreferences prefs = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
                 prefs.edit().putBoolean("debugViewMetrics", SharedConfig.debugViewMetrics = !SharedConfig.debugViewMetrics).apply();
+            } else if (which == 42) {
+                SharedSettings.experimentalSettingsAllowed.toggle();
+                listView.adapter.update(true);
             }
         });
         builder.setNegativeButton(getString(R.string.Cancel), null);
